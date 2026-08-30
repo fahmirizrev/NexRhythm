@@ -84,3 +84,5 @@ patches/output/
 # Local development artifacts
 temp/
 patches/output/
+patches/
+prompt/
