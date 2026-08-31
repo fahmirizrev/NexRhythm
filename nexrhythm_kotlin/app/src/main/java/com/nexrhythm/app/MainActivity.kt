@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -92,14 +93,14 @@ class MainActivity : ComponentActivity() {
 private fun TrainerScreen(
     modifier: Modifier = Modifier
 ) {
-    var bpm by remember { mutableIntStateOf(120) }
-    var subdivision by remember { mutableIntStateOf(4) }
+    var bpm by remember { mutableIntStateOf(60) }
+    var subdivision by remember { mutableIntStateOf(2) }
     var timeSignature by remember { mutableStateOf(TimeSignature.FOUR_FOUR) }
     var metronomeEnabled by remember { mutableStateOf(true) }
     var metronomeSound by remember { mutableStateOf(MetronomeSoundMode.CLICK) }
 
     var guideEnabled by remember { mutableStateOf(true) }
-    var guideSound by remember { mutableStateOf(GuideSoundMode.SNARE) }
+    var guideSound by remember { mutableStateOf(GuideSoundMode.WOOD) }
 
     var isRunning by remember { mutableStateOf(false) }
     var activeStep by remember { mutableIntStateOf(-1) }
@@ -119,6 +120,8 @@ private fun TrainerScreen(
         guideSound = guideSound
     )
 
+    val currentBpm by rememberUpdatedState(bpm)
+
     DisposableEffect(audioEngine) {
         onDispose {
             audioEngine.release()
@@ -136,8 +139,14 @@ private fun TrainerScreen(
 
     LaunchedEffect(
         audioEngine,
+        bpm
+    ) {
+        audioEngine.updateBpm(bpm)
+    }
+
+    LaunchedEffect(
+        audioEngine,
         isRunning,
-        bpm,
         subdivision,
         timeSignature
     ) {
@@ -155,7 +164,6 @@ private fun TrainerScreen(
 
     LaunchedEffect(
         isRunning,
-        bpm,
         subdivision,
         timeSignature
     ) {
@@ -166,13 +174,26 @@ private fun TrainerScreen(
 
         activeStep = 0
 
-        val beatDurationNanos = 60_000_000_000L / bpm
-        val startTimeNanos = withFrameNanos { it }
+        var beatDurationNanos =
+            60_000_000_000L / currentBpm
+
+        var beatStartTimeNanos =
+            withFrameNanos { it }
 
         while (true) {
             withFrameNanos { frameTimeNanos ->
-                val elapsedNanos = frameTimeNanos - startTimeNanos
-                val elapsedInBeat = elapsedNanos % beatDurationNanos
+                var elapsedInBeat =
+                    frameTimeNanos - beatStartTimeNanos
+
+                while (elapsedInBeat >= beatDurationNanos) {
+                    beatStartTimeNanos += beatDurationNanos
+
+                    beatDurationNanos =
+                        60_000_000_000L / currentBpm
+
+                    elapsedInBeat =
+                        frameTimeNanos - beatStartTimeNanos
+                }
 
                 activeStep = (
                         (elapsedInBeat * subdivision) / beatDurationNanos
@@ -883,7 +904,7 @@ private fun AudioControlGroup(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             SoundDropdown(
                 selectedSound = selectedSound,
@@ -923,7 +944,7 @@ private fun SoundDropdown(
                     shape = RoundedCornerShape(12.dp)
                 ),
             shape = RoundedCornerShape(12.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -941,7 +962,7 @@ private fun SoundDropdown(
                 val chevronColor = MaterialTheme.colorScheme.onSurfaceVariant
 
                 Canvas(
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(16.dp)
                 ) {
                     val path = Path().apply {
                         moveTo(

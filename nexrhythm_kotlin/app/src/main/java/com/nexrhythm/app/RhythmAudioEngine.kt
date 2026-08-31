@@ -89,11 +89,12 @@ internal class RhythmAudioEngine(
             metronomeEnabled = true,
             metronomeSound = MetronomeSoundMode.CLICK,
             guideEnabled = true,
-            guideSound = GuideSoundMode.SNARE
+            guideSound = GuideSoundMode.WOOD
         )
     )
 
     private val generation = AtomicInteger(0)
+    private val currentBpm = AtomicInteger(60)
 
     @Volatile
     private var worker: Thread? = null
@@ -107,6 +108,14 @@ internal class RhythmAudioEngine(
         options.set(newOptions)
     }
 
+    fun updateBpm(
+        bpm: Int
+    ) {
+        currentBpm.set(
+            bpm.coerceAtLeast(1)
+        )
+    }
+
     @Synchronized
     fun start(
         bpm: Int,
@@ -116,6 +125,10 @@ internal class RhythmAudioEngine(
     ) {
         stopLocked()
 
+        currentBpm.set(
+            bpm.coerceAtLeast(1)
+        )
+
         options.set(initialOptions)
 
         val runId = generation.incrementAndGet()
@@ -124,7 +137,6 @@ internal class RhythmAudioEngine(
             {
                 renderLoop(
                     runId = runId,
-                    bpm = bpm,
                     subdivision = subdivision,
                     timeSignature = timeSignature
                 )
@@ -169,18 +181,9 @@ internal class RhythmAudioEngine(
 
     private fun renderLoop(
         runId: Int,
-        bpm: Int,
         subdivision: Int,
         timeSignature: TimeSignature
     ) {
-        val beatFrames = RhythmAudioTiming.beatFrames(bpm)
-
-        val subdivisionOffsets =
-            RhythmAudioTiming.subdivisionOffsets(
-                beatFrames = beatFrames,
-                subdivision = subdivision
-            )
-
         val guideSyllables = syllablesFor(subdivision).map { syllable ->
             sampleBank.syllables.getValue(syllable)
         }
@@ -204,6 +207,17 @@ internal class RhythmAudioEngine(
             track.play()
 
             while (isCurrent(runId)) {
+                val beatFrames =
+                    RhythmAudioTiming.beatFrames(
+                        currentBpm.get()
+                    )
+
+                val subdivisionOffsets =
+                    RhythmAudioTiming.subdivisionOffsets(
+                        beatFrames = beatFrames,
+                        subdivision = subdivision
+                    )
+
                 val mixBuffer = IntArray(
                     beatFrames + maxSampleFrames
                 )
