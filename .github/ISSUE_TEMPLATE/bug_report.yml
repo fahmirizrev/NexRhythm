@@ -1,0 +1,105 @@
+name: Bug report
+description: Report a reproducible problem in NexRhythm
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please provide enough information for the issue to be reproduced.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: Describe the problem clearly and concisely.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Basic
+        - My Exercise
+        - Polyrhythm
+        - Audio / timing
+        - Time signature / tempo
+        - Navigation / About
+        - Build / installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable sequence that reproduces the issue.
+      placeholder: |
+        1. Open ...
+        2. Set ...
+        3. Tap ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: NexRhythm version / commit
+      placeholder: "Example: v0.x.x or commit SHA"
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: "Example: Pixel 8, Xiaomi 14, emulator"
+    validations:
+      required: false
+
+  - type: input
+    id: android
+    attributes:
+      label: Android version
+      placeholder: "Example: Android 15"
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or recordings
+      description: Add supporting evidence when useful. Remove sensitive information first.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: This report does not contain passwords, credentials, private data, or undisclosed security-vulnerability details.
+          required: true
