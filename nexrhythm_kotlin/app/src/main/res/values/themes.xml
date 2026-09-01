@@ -2,4 +2,16 @@
 <resources>
 
     <style name="Theme.NexRhythm" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.NexRhythm.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">
+            @color/nexrhythm_splash_background
+        </item>
+        <item name="windowSplashScreenAnimatedIcon">
+            @mipmap/ic_launcher
+        </item>
+        <item name="postSplashScreenTheme">
+            @style/Theme.NexRhythm
+        </item>
+    </style>
 </resources>
