@@ -158,11 +158,134 @@ internal object RhythmAudioTiming {
 
             else -> {
                 RhythmExerciseProgress(
-                    subdivision = 1,
-                    measure = safeMeasuresPerSubdivision,
-                    direction = ExerciseDirection.DESCENDING,
-                    completed = true
+                    subdivision = 2,
+                    measure = 1,
+                    direction = ExerciseDirection.ASCENDING,
+                    completed = false
                 )
+            }
+        }
+    }
+
+    fun nextCustomExerciseProgress(
+        subdivisions: List<Int>,
+        currentSubdivision: Int,
+        currentMeasure: Int,
+        measuresPerSubdivision: Int,
+        currentDirection: ExerciseDirection
+    ): RhythmExerciseProgress {
+        val safeSubdivisions =
+            subdivisions
+                .map {
+                    it.coerceIn(1, 8)
+                }
+                .distinct()
+                .sorted()
+
+        if (safeSubdivisions.isEmpty()) {
+            return RhythmExerciseProgress(
+                subdivision = 1,
+                measure = 1,
+                direction = ExerciseDirection.ASCENDING,
+                completed = true
+            )
+        }
+
+        val currentIndex =
+            safeSubdivisions
+                .indexOf(currentSubdivision)
+                .let { index ->
+                    if (index >= 0) {
+                        index
+                    } else {
+                        0
+                    }
+                }
+
+        val safeMeasuresPerSubdivision =
+            measuresPerSubdivision.coerceAtLeast(1)
+
+        val safeMeasure =
+            currentMeasure.coerceIn(
+                1,
+                safeMeasuresPerSubdivision
+            )
+
+        if (
+            safeMeasure <
+            safeMeasuresPerSubdivision
+        ) {
+            return RhythmExerciseProgress(
+                subdivision =
+                    safeSubdivisions[currentIndex],
+                measure = safeMeasure + 1,
+                direction = currentDirection,
+                completed = false
+            )
+        }
+
+        if (safeSubdivisions.size == 1) {
+            return RhythmExerciseProgress(
+                subdivision =
+                    safeSubdivisions.first(),
+                measure = 1,
+                direction = currentDirection,
+                completed = false
+            )
+        }
+
+        return when (currentDirection) {
+            ExerciseDirection.ASCENDING -> {
+                if (
+                    currentIndex <
+                    safeSubdivisions.lastIndex
+                ) {
+                    RhythmExerciseProgress(
+                        subdivision =
+                            safeSubdivisions[
+                                currentIndex + 1
+                            ],
+                        measure = 1,
+                        direction =
+                            ExerciseDirection.ASCENDING,
+                        completed = false
+                    )
+                } else {
+                    RhythmExerciseProgress(
+                        subdivision =
+                            safeSubdivisions[
+                                currentIndex - 1
+                            ],
+                        measure = 1,
+                        direction =
+                            ExerciseDirection.DESCENDING,
+                        completed = false
+                    )
+                }
+            }
+
+            ExerciseDirection.DESCENDING -> {
+                if (currentIndex > 0) {
+                    RhythmExerciseProgress(
+                        subdivision =
+                            safeSubdivisions[
+                                currentIndex - 1
+                            ],
+                        measure = 1,
+                        direction =
+                            ExerciseDirection.DESCENDING,
+                        completed = false
+                    )
+                } else {
+                    RhythmExerciseProgress(
+                        subdivision =
+                            safeSubdivisions[1],
+                        measure = 1,
+                        direction =
+                            ExerciseDirection.ASCENDING,
+                        completed = false
+                    )
+                }
             }
         }
     }
@@ -229,7 +352,8 @@ internal class RhythmAudioEngine(
         subdivision: Int,
         timeSignature: TimeSignature,
         initialOptions: RhythmAudioOptions,
-        exerciseMeasuresPerSubdivision: Int? = null
+        exerciseMeasuresPerSubdivision: Int? = null,
+        exerciseSequence: List<Int>? = null
     ) {
         stopLocked()
 
@@ -239,11 +363,34 @@ internal class RhythmAudioEngine(
 
         options.set(initialOptions)
 
+        val customExerciseSequence =
+            exerciseSequence
+                ?.map {
+                    it.coerceIn(1, 8)
+                }
+                ?.distinct()
+                ?.sorted()
+
+        if (
+            exerciseSequence != null &&
+            customExerciseSequence.isNullOrEmpty()
+        ) {
+            return
+        }
+
         val initialSubdivision =
-            if (exerciseMeasuresPerSubdivision != null) {
-                1
-            } else {
-                subdivision.coerceIn(1, 8)
+            when {
+                customExerciseSequence != null -> {
+                    customExerciseSequence.first()
+                }
+
+                exerciseMeasuresPerSubdivision != null -> {
+                    1
+                }
+
+                else -> {
+                    subdivision.coerceIn(1, 8)
+                }
             }
 
         playbackState.set(
@@ -251,13 +398,20 @@ internal class RhythmAudioEngine(
                 subdivision = initialSubdivision,
                 beatIndex = 0,
                 exerciseMeasure =
-                    if (exerciseMeasuresPerSubdivision != null) {
+                    if (
+                        exerciseMeasuresPerSubdivision !=
+                        null
+                    ) {
                         1
                     } else {
                         null
                     },
                 exerciseDirection =
-                    if (exerciseMeasuresPerSubdivision != null) {
+                    if (
+                        exerciseMeasuresPerSubdivision !=
+                        null &&
+                        customExerciseSequence == null
+                    ) {
                         ExerciseDirection.ASCENDING
                     } else {
                         null
@@ -276,7 +430,9 @@ internal class RhythmAudioEngine(
                     subdivision = initialSubdivision,
                     timeSignature = timeSignature,
                     exerciseMeasuresPerSubdivision =
-                        exerciseMeasuresPerSubdivision
+                        exerciseMeasuresPerSubdivision,
+                    exerciseSequence =
+                        customExerciseSequence
                 )
             },
             "NexRhythmAudio"
@@ -322,11 +478,15 @@ internal class RhythmAudioEngine(
         runId: Int,
         subdivision: Int,
         timeSignature: TimeSignature,
-        exerciseMeasuresPerSubdivision: Int?
+        exerciseMeasuresPerSubdivision: Int?,
+        exerciseSequence: List<Int>?
     ) {
         val exerciseMeasures =
             exerciseMeasuresPerSubdivision
                 ?.coerceAtLeast(1)
+
+        val customExerciseSequence =
+            exerciseSequence
 
         var currentSubdivision =
             subdivision.coerceIn(1, 8)
@@ -360,7 +520,10 @@ internal class RhythmAudioEngine(
                         null
                     },
                 exerciseDirection =
-                    if (exerciseMeasures != null) {
+                    if (
+                        exerciseMeasures != null &&
+                        customExerciseSequence == null
+                    ) {
                         exerciseDirection
                     } else {
                         null
@@ -471,12 +634,33 @@ internal class RhythmAudioEngine(
                     exerciseMeasures != null
                 ) {
                     val nextProgress =
-                        RhythmAudioTiming.nextExerciseProgress(
-                            currentSubdivision = currentSubdivision,
-                            currentMeasure = exerciseMeasure,
-                            measuresPerSubdivision = exerciseMeasures,
-                            currentDirection = exerciseDirection
-                        )
+                        if (customExerciseSequence != null) {
+                            RhythmAudioTiming
+                                .nextCustomExerciseProgress(
+                                    subdivisions =
+                                        customExerciseSequence,
+                                    currentSubdivision =
+                                        currentSubdivision,
+                                    currentMeasure =
+                                        exerciseMeasure,
+                                    measuresPerSubdivision =
+                                        exerciseMeasures,
+                                    currentDirection =
+                                        exerciseDirection
+                                )
+                        } else {
+                            RhythmAudioTiming
+                                .nextExerciseProgress(
+                                    currentSubdivision =
+                                        currentSubdivision,
+                                    currentMeasure =
+                                        exerciseMeasure,
+                                    measuresPerSubdivision =
+                                        exerciseMeasures,
+                                    currentDirection =
+                                        exerciseDirection
+                                )
+                        }
 
                     currentSubdivision =
                         nextProgress.subdivision
@@ -490,10 +674,20 @@ internal class RhythmAudioEngine(
                     if (nextProgress.completed) {
                         playbackState.set(
                             RhythmPlaybackState(
-                                subdivision = currentSubdivision,
+                                subdivision =
+                                    currentSubdivision,
                                 beatIndex = 0,
-                                exerciseMeasure = exerciseMeasure,
-                                exerciseDirection = exerciseDirection,
+                                exerciseMeasure =
+                                    exerciseMeasure,
+                                exerciseDirection =
+                                    if (
+                                        customExerciseSequence ==
+                                        null
+                                    ) {
+                                        exerciseDirection
+                                    } else {
+                                        null
+                                    },
                                 exerciseComplete = true
                             )
                         )
@@ -502,8 +696,11 @@ internal class RhythmAudioEngine(
                     }
 
                     guideSyllables =
-                        syllablesFor(currentSubdivision).map { syllable ->
-                            sampleBank.syllables.getValue(syllable)
+                        syllablesFor(
+                            currentSubdivision
+                        ).map { syllable ->
+                            sampleBank.syllables
+                                .getValue(syllable)
                         }
                 }
 
@@ -520,7 +717,10 @@ internal class RhythmAudioEngine(
                                 null
                             },
                         exerciseDirection =
-                            if (exerciseMeasures != null) {
+                            if (
+                                exerciseMeasures != null &&
+                                customExerciseSequence == null
+                            ) {
                                 exerciseDirection
                             } else {
                                 null

@@ -99,7 +99,9 @@ class MainActivity : ComponentActivity() {
 private enum class TrainerMode(
     val label: String
 ) {
-    BASIC("Basic"), PYRAMID_EXERCISE("Pyramid Exercise")
+    BASIC("Basic"),
+    PYRAMID_EXERCISE("Pyramid Exercise"),
+    MY_EXERCISE("My Exercise")
 }
 
 @Composable
@@ -133,6 +135,21 @@ private fun TrainerScreen(
         mutableStateOf(ExerciseDirection.ASCENDING)
     }
 
+    var myExerciseSubdivisions by remember {
+        mutableStateOf(
+            setOf(1, 2, 3, 4)
+        )
+    }
+    var myExerciseMeasuresPerSubdivision by remember {
+        mutableIntStateOf(2)
+    }
+    var myExerciseSubdivision by remember {
+        mutableIntStateOf(1)
+    }
+    var myExerciseMeasure by remember {
+        mutableIntStateOf(1)
+    }
+
     var metronomeEnabled by remember { mutableStateOf(true) }
 
     var metronomeSound by remember { mutableStateOf(MetronomeSoundMode.CLICK) }
@@ -163,11 +180,25 @@ private fun TrainerScreen(
 
     val currentBpm by rememberUpdatedState(bpm)
 
-    val displayedSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-        exerciseSubdivision
-    } else {
-        subdivision
-    }
+    val myExerciseSequence =
+        myExerciseSubdivisions
+            .toList()
+            .sorted()
+
+    val displayedSubdivision =
+        when (trainerMode) {
+            TrainerMode.BASIC -> {
+                subdivision
+            }
+
+            TrainerMode.PYRAMID_EXERCISE -> {
+                exerciseSubdivision
+            }
+
+            TrainerMode.MY_EXERCISE -> {
+                myExerciseSubdivision
+            }
+        }
 
     DisposableEffect(audioEngine) {
 
@@ -196,23 +227,49 @@ private fun TrainerScreen(
         trainerMode,
         subdivision,
         timeSignature,
-        exerciseMeasuresPerSubdivision
+        exerciseMeasuresPerSubdivision,
+        myExerciseSubdivisions,
+        myExerciseMeasuresPerSubdivision
     ) {
         if (isRunning) {
             audioEngine.start(
                 bpm = bpm,
-                subdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-                    1
-                } else {
-                    subdivision
-                },
+                subdivision =
+                    when (trainerMode) {
+                        TrainerMode.BASIC -> {
+                            subdivision
+                        }
+
+                        TrainerMode.PYRAMID_EXERCISE -> {
+                            1
+                        }
+
+                        TrainerMode.MY_EXERCISE -> {
+                            myExerciseSequence.firstOrNull() ?: 1
+                        }
+                    },
                 timeSignature = timeSignature,
                 initialOptions = audioOptions,
-                exerciseMeasuresPerSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-                    exerciseMeasuresPerSubdivision
-                } else {
-                    null
-                }
+                exerciseMeasuresPerSubdivision =
+                    when (trainerMode) {
+                        TrainerMode.BASIC -> {
+                            null
+                        }
+
+                        TrainerMode.PYRAMID_EXERCISE -> {
+                            exerciseMeasuresPerSubdivision
+                        }
+
+                        TrainerMode.MY_EXERCISE -> {
+                            myExerciseMeasuresPerSubdivision
+                        }
+                    },
+                exerciseSequence =
+                    if (trainerMode == TrainerMode.MY_EXERCISE) {
+                        myExerciseSequence
+                    } else {
+                        null
+                    }
             )
         } else {
             audioEngine.stop()
@@ -233,11 +290,20 @@ private fun TrainerScreen(
         currentBeatIndex = 0
 
 
-        var visualSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-            1
-        } else {
-            subdivision
-        }
+        var visualSubdivision =
+            when (trainerMode) {
+                TrainerMode.BASIC -> {
+                    subdivision
+                }
+
+                TrainerMode.PYRAMID_EXERCISE -> {
+                    1
+                }
+
+                TrainerMode.MY_EXERCISE -> {
+                    myExerciseSequence.firstOrNull() ?: 1
+                }
+            }
 
         if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
             exerciseSubdivision = 1
@@ -245,13 +311,17 @@ private fun TrainerScreen(
             exerciseDirection = ExerciseDirection.ASCENDING
         }
 
+        if (trainerMode == TrainerMode.MY_EXERCISE) {
+            myExerciseSubdivision =
+                myExerciseSequence.firstOrNull() ?: 1
+            myExerciseMeasure = 1
+        }
+
         var beatDurationNanos = 60_000_000_000L / currentBpm
 
         var beatStartTimeNanos = withFrameNanos { it }
 
-        var exerciseCompleted = false
-
-        while (!exerciseCompleted) {
+        while (true) {
             withFrameNanos { frameTimeNanos ->
                 val playbackState = audioEngine.playbackState()
 
@@ -267,12 +337,6 @@ private fun TrainerScreen(
                         exerciseDirection =
                             playbackState.exerciseDirection ?: ExerciseDirection.ASCENDING
 
-                        if (playbackState.exerciseComplete) {
-
-                            exerciseCompleted = true
-                            return@withFrameNanos
-                        }
-
                         if (playbackState.subdivision != visualSubdivision) {
                             visualSubdivision = playbackState.subdivision
 
@@ -287,7 +351,37 @@ private fun TrainerScreen(
                     }
                 }
 
-                var elapsedInBeat = frameTimeNanos - beatStartTimeNanos
+                if (
+                    trainerMode == TrainerMode.MY_EXERCISE &&
+                    playbackState.exerciseMeasure != null
+                ) {
+                    myExerciseSubdivision =
+                        playbackState.subdivision
+
+                    myExerciseMeasure =
+                        playbackState.exerciseMeasure
+
+                    if (
+                        playbackState.subdivision !=
+                        visualSubdivision
+                    ) {
+                        visualSubdivision =
+                            playbackState.subdivision
+
+                        beatStartTimeNanos =
+                            frameTimeNanos
+
+                        beatDurationNanos =
+                            60_000_000_000L / currentBpm
+
+                        activeStep = 0
+
+                        return@withFrameNanos
+                    }
+                }
+
+                var elapsedInBeat =
+                    frameTimeNanos - beatStartTimeNanos
 
                 while (elapsedInBeat >= beatDurationNanos) {
                     beatStartTimeNanos += beatDurationNanos
@@ -302,10 +396,6 @@ private fun TrainerScreen(
                         0, visualSubdivision - 1
                     )
             }
-        }
-
-        if (trainerMode == TrainerMode.PYRAMID_EXERCISE && isRunning) {
-            isRunning = false
         }
     }
 
@@ -389,7 +479,29 @@ private fun TrainerScreen(
                     })
 
                 DrawerTreeItem(
-                    branch = "├──", label = "My Exercise", enabled = false, onClick = {})
+                    branch = "├──",
+                    label = "My Exercise",
+                    selected =
+                        trainerMode == TrainerMode.MY_EXERCISE,
+                    onClick = {
+                        if (
+                            trainerMode !=
+                            TrainerMode.MY_EXERCISE
+                        ) {
+                            isRunning = false
+                            activeStep = -1
+                            trainerMode =
+                                TrainerMode.MY_EXERCISE
+                            myExerciseSubdivision =
+                                myExerciseSequence
+                                    .firstOrNull() ?: 1
+                            myExerciseMeasure = 1
+                        }
+
+                        coroutineScope.launch {
+                            drawerState.close()
+                        }
+                    })
 
                 DrawerTreeItem(
                     branch = "└──",
@@ -455,19 +567,73 @@ private fun TrainerScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            if (trainerMode == TrainerMode.BASIC) {
-                SubdivisionSection(
-                    selectedSubdivision = subdivision, onSubdivisionSelected = { subdivision = it })
-            } else {
-                PyramidExerciseSection(
-                    measuresPerSubdivision = exerciseMeasuresPerSubdivision,
-                    currentSubdivision = exerciseSubdivision,
-                    currentMeasure = exerciseMeasure,
-                    currentDirection = exerciseDirection,
-                    isRunning = isRunning,
-                    onMeasuresChange = { measures ->
-                        exerciseMeasuresPerSubdivision = measures.coerceIn(1, 8)
-                    })
+            when (trainerMode) {
+                TrainerMode.BASIC -> {
+                    SubdivisionSection(
+                        selectedSubdivision = subdivision,
+                        onSubdivisionSelected = {
+                            subdivision = it
+                        }
+                    )
+                }
+
+                TrainerMode.PYRAMID_EXERCISE -> {
+                    PyramidExerciseSection(
+                        measuresPerSubdivision =
+                            exerciseMeasuresPerSubdivision,
+                        currentSubdivision =
+                            exerciseSubdivision,
+                        currentMeasure =
+                            exerciseMeasure,
+                        currentDirection =
+                            exerciseDirection,
+                        isRunning = isRunning,
+                        onMeasuresChange = { measures ->
+                            exerciseMeasuresPerSubdivision =
+                                measures.coerceIn(1, 8)
+                        }
+                    )
+                }
+
+                TrainerMode.MY_EXERCISE -> {
+                    MyExerciseSection(
+                        selectedSubdivisions =
+                            myExerciseSubdivisions,
+                        currentSubdivision =
+                            myExerciseSubdivision,
+                        currentMeasure =
+                            myExerciseMeasure,
+                        measuresPerSubdivision =
+                            myExerciseMeasuresPerSubdivision,
+                        isRunning = isRunning,
+                        onSubdivisionToggle = { selectedSubdivision ->
+                            val updatedSubdivisions =
+                                if (
+                                    selectedSubdivision in
+                                    myExerciseSubdivisions
+                                ) {
+                                    myExerciseSubdivisions -
+                                            selectedSubdivision
+                                } else {
+                                    myExerciseSubdivisions +
+                                            selectedSubdivision
+                                }
+
+                            myExerciseSubdivisions =
+                                updatedSubdivisions
+
+                            if (!isRunning) {
+                                myExerciseSubdivision =
+                                    updatedSubdivisions
+                                        .minOrNull() ?: 1
+                            }
+                        },
+                        onMeasuresChange = { measures ->
+                            myExerciseMeasuresPerSubdivision =
+                                measures.coerceIn(1, 8)
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -515,16 +681,33 @@ private fun TrainerScreen(
                     if (isRunning) {
                         isRunning = false
                     } else {
-                        if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-                            exerciseSubdivision = 1
-                            exerciseMeasure = 1
-                            exerciseDirection = ExerciseDirection.ASCENDING
+                        when (trainerMode) {
+                            TrainerMode.BASIC -> {
+                                Unit
+                            }
+
+                            TrainerMode.PYRAMID_EXERCISE -> {
+                                exerciseSubdivision = 1
+                                exerciseMeasure = 1
+                                exerciseDirection =
+                                    ExerciseDirection.ASCENDING
+                            }
+
+                            TrainerMode.MY_EXERCISE -> {
+                                myExerciseSubdivision =
+                                    myExerciseSequence
+                                        .firstOrNull() ?: 1
+                                myExerciseMeasure = 1
+                            }
                         }
 
                         isRunning = true
 
                     }
                 },
+                enabled =
+                    trainerMode != TrainerMode.MY_EXERCISE ||
+                            myExerciseSequence.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -538,8 +721,14 @@ private fun TrainerScreen(
                             "■  STOP"
                         }
 
-                        trainerMode == TrainerMode.PYRAMID_EXERCISE -> {
+                        trainerMode ==
+                                TrainerMode.PYRAMID_EXERCISE -> {
                             "▶  START PYRAMID EXERCISE"
+                        }
+
+                        trainerMode ==
+                                TrainerMode.MY_EXERCISE -> {
+                            "▶  START MY EXERCISE"
                         }
 
                         else -> {
@@ -901,6 +1090,246 @@ private fun SubdivisionSection(
                 Spacer(modifier = Modifier.height(6.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun MyExerciseSection(
+    selectedSubdivisions: Set<Int>,
+    currentSubdivision: Int,
+    currentMeasure: Int,
+    measuresPerSubdivision: Int,
+    isRunning: Boolean,
+    onSubdivisionToggle: (Int) -> Unit,
+    onMeasuresChange: (Int) -> Unit
+) {
+    val ascendingSequence =
+        selectedSubdivisions
+            .toList()
+            .sorted()
+
+    val sequence =
+        if (ascendingSequence.size <= 1) {
+            ascendingSequence
+        } else {
+            ascendingSequence +
+                    ascendingSequence
+                        .dropLast(1)
+                        .asReversed()
+        }
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        SectionLabel("MY EXERCISE")
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "Choose Subdivisions",
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        for (rowIndex in 0 until 2) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp)
+            ) {
+                for (columnIndex in 1..4) {
+                    val subdivision =
+                        rowIndex * 4 + columnIndex
+
+                    val selected =
+                        subdivision in selectedSubdivisions
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(32.dp)
+                            .clickable(
+                                enabled = !isRunning
+                            ) {
+                                onSubdivisionToggle(
+                                    subdivision
+                                )
+                            },
+                        contentAlignment =
+                            Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(
+                                    RoundedCornerShape(
+                                        8.dp
+                                    )
+                                )
+                                .background(
+                                    if (selected) {
+                                        MaterialTheme
+                                            .colorScheme
+                                            .primaryContainer
+                                    } else {
+                                        Color.Transparent
+                                    }
+                                ),
+                            contentAlignment =
+                                Alignment.Center
+                        ) {
+                            Text(
+                                text =
+                                    subdivision.toString(),
+                                color =
+                                    if (selected) {
+                                        MaterialTheme
+                                            .colorScheme
+                                            .primary
+                                    } else {
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant
+                                    },
+                                fontSize = 13.sp,
+                                fontWeight =
+                                    if (selected) {
+                                        FontWeight.SemiBold
+                                    } else {
+                                        FontWeight.Medium
+                                    }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (rowIndex == 0) {
+                Spacer(
+                    modifier =
+                        Modifier.height(4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = {
+                    onMeasuresChange(
+                        measuresPerSubdivision - 1
+                    )
+                },
+                enabled =
+                    !isRunning &&
+                            measuresPerSubdivision > 1,
+                contentPadding =
+                    PaddingValues(0.dp),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Text(
+                    text = "−",
+                    fontSize = 19.sp
+                )
+            }
+
+            Text(
+                text = buildString {
+                    append(
+                        measuresPerSubdivision
+                    )
+                    append(
+                        if (
+                            measuresPerSubdivision == 1
+                        ) {
+                            " Measure each"
+                        } else {
+                            " Measures each"
+                        }
+                    )
+                },
+                color =
+                    MaterialTheme.colorScheme.onSurface,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            TextButton(
+                onClick = {
+                    onMeasuresChange(
+                        measuresPerSubdivision + 1
+                    )
+                },
+                enabled =
+                    !isRunning &&
+                            measuresPerSubdivision < 8,
+                contentPadding =
+                    PaddingValues(0.dp),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Text(
+                    text = "+",
+                    fontSize = 17.sp
+                )
+            }
+
+            Spacer(
+                modifier = Modifier.weight(1f)
+            )
+
+            Text(
+                text =
+                    if (isRunning) {
+                        "$currentSubdivision  ·  " +
+                                "Measure " +
+                                "$currentMeasure/" +
+                                "$measuresPerSubdivision"
+                    } else {
+                        "${selectedSubdivisions.size} selected"
+                    },
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        Text(
+            text =
+                if (sequence.isEmpty()) {
+                    "Choose at least one subdivision"
+                } else {
+                    sequence.joinToString(" → ")
+                },
+            modifier = Modifier.fillMaxWidth(),
+            color =
+                if (sequence.isEmpty()) {
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant
+                } else {
+                    MaterialTheme
+                        .colorScheme
+                        .primary
+                },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
