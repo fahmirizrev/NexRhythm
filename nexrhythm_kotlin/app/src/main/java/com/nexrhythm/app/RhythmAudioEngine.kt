@@ -739,15 +739,7 @@ internal class RhythmAudioEngine(
                                 beatIndex = 0,
                                 exerciseMeasure =
                                     exerciseMeasure,
-                                exerciseDirection =
-                                    if (
-                                        customExerciseSequence ==
-                                        null
-                                    ) {
-                                        exerciseDirection
-                                    } else {
-                                        null
-                                    },
+                                exerciseDirection = null,
                                 exerciseComplete = true
                             )
                         )
