@@ -16,6 +16,68 @@ class RhythmAudioTimingTest {
     }
 
     @Test
+    fun denominatorChangesBeatDuration() {
+        assertEquals(
+            48_000,
+            RhythmAudioTiming.beatFrames(
+                bpm = 120,
+                denominator = 2
+            )
+        )
+
+        assertEquals(
+            24_000,
+            RhythmAudioTiming.beatFrames(
+                bpm = 120,
+                denominator = 4
+            )
+        )
+
+        assertEquals(
+            12_000,
+            RhythmAudioTiming.beatFrames(
+                bpm = 120,
+                denominator = 8
+            )
+        )
+
+        assertEquals(
+            6_000,
+            RhythmAudioTiming.beatFrames(
+                bpm = 120,
+                denominator = 16
+            )
+        )
+    }
+
+    @Test
+    fun beatDurationNanosMatchesDenominator() {
+        assertEquals(
+            1_000_000_000L,
+            RhythmAudioTiming.beatDurationNanos(
+                bpm = 60,
+                denominator = 4
+            )
+        )
+
+        assertEquals(
+            500_000_000L,
+            RhythmAudioTiming.beatDurationNanos(
+                bpm = 60,
+                denominator = 8
+            )
+        )
+
+        assertEquals(
+            250_000_000L,
+            RhythmAudioTiming.beatDurationNanos(
+                bpm = 60,
+                denominator = 16
+            )
+        )
+    }
+
+    @Test
     fun subdivisionFourUsesQuarterBeatOffsets() {
         val beatFrames =
             RhythmAudioTiming.beatFrames(120)
@@ -35,6 +97,106 @@ class RhythmAudioTimingTest {
             ),
             offsets
         )
+    }
+
+    @Test
+    fun polyrhythmThreeTwoUsesSharedBeatCycle() {
+        val beatFrames = 24_000
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                8_000,
+                16_000
+            ),
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 3
+            )
+        )
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                12_000
+            ),
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 2
+            )
+        )
+    }
+
+    @Test
+    fun polyrhythmFourThreeUsesSharedBeatCycle() {
+        val beatFrames = 24_000
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                6_000,
+                12_000,
+                18_000
+            ),
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 4
+            )
+        )
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                8_000,
+                16_000
+            ),
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 3
+            )
+        )
+    }
+
+    @Test
+    fun polyrhythmBoundaryRatiosStayInsideBeat() {
+        val beatFrames = 24_000
+
+        val two =
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 2
+            )
+
+        val eight =
+            RhythmAudioTiming.polyrhythmOffsets(
+                beatFrames = beatFrames,
+                pulseCount = 8
+            )
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                12_000
+            ),
+            two
+        )
+
+        assertArrayEquals(
+            intArrayOf(
+                0,
+                3_000,
+                6_000,
+                9_000,
+                12_000,
+                15_000,
+                18_000,
+                21_000
+            ),
+            eight
+        )
+
+        assertTrue(two.last() < beatFrames)
+        assertTrue(eight.last() < beatFrames)
     }
 
     @Test
@@ -111,13 +273,40 @@ class RhythmAudioTimingTest {
     }
 
     @Test
-    fun mvpTimeSignaturesUseQuarterNoteDenominator() {
-        TimeSignature.entries.forEach { timeSignature ->
-            assertEquals(
-                4,
-                timeSignature.denominator
+    fun configurableTimeSignatureSupportsTargetRange() {
+        val timeSignature =
+            TimeSignature(
+                numerator = 24,
+                denominator = 16
             )
-        }
+
+        assertEquals(
+            24,
+            timeSignature.numerator
+        )
+        assertEquals(
+            16,
+            timeSignature.denominator
+        )
+        assertEquals(
+            "24/16",
+            timeSignature.label
+        )
+    }
+
+    @Test
+    fun twentyThreeEightWrapsAfterTwentyThirdBeat() {
+        assertEquals(
+            0,
+            RhythmAudioTiming.nextBeatInMeasure(
+                currentBeatIndex = 22,
+                timeSignature =
+                    TimeSignature(
+                        numerator = 23,
+                        denominator = 8
+                    )
+            )
+        )
     }
 
     @Test

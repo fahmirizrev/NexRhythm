@@ -101,7 +101,8 @@ private enum class TrainerMode(
 ) {
     BASIC("Basic"),
     PYRAMID_EXERCISE("Pyramid Exercise"),
-    MY_EXERCISE("My Exercise")
+    MY_EXERCISE("My Exercise"),
+    POLYRHYTHM("Polyrhythm")
 }
 
 @Composable
@@ -150,6 +151,34 @@ private fun TrainerScreen(
         mutableIntStateOf(1)
     }
 
+    var polyrhythmLayerA by remember {
+        mutableIntStateOf(3)
+    }
+
+    var polyrhythmLayerB by remember {
+        mutableIntStateOf(2)
+    }
+
+    var polyrhythmMetronomeEnabled by remember {
+        mutableStateOf(true)
+    }
+
+    var polyrhythmLayerAEnabled by remember {
+        mutableStateOf(true)
+    }
+
+    var polyrhythmLayerBEnabled by remember {
+        mutableStateOf(true)
+    }
+
+    var activePolyrhythmLayerA by remember {
+        mutableIntStateOf(-1)
+    }
+
+    var activePolyrhythmLayerB by remember {
+        mutableIntStateOf(-1)
+    }
+
     var metronomeEnabled by remember { mutableStateOf(true) }
 
     var metronomeSound by remember { mutableStateOf(MetronomeSoundMode.CLICK) }
@@ -178,6 +207,16 @@ private fun TrainerScreen(
         guideSound = guideSound
     )
 
+    val polyrhythmAudioOptions =
+        PolyrhythmAudioOptions(
+            metronomeEnabled =
+                polyrhythmMetronomeEnabled,
+            layerAEnabled =
+                polyrhythmLayerAEnabled,
+            layerBEnabled =
+                polyrhythmLayerBEnabled
+        )
+
     val currentBpm by rememberUpdatedState(bpm)
 
     val myExerciseSequence =
@@ -198,6 +237,10 @@ private fun TrainerScreen(
             TrainerMode.MY_EXERCISE -> {
                 myExerciseSubdivision
             }
+
+            TrainerMode.POLYRHYTHM -> {
+                1
+            }
         }
 
     DisposableEffect(audioEngine) {
@@ -216,6 +259,15 @@ private fun TrainerScreen(
     }
 
     LaunchedEffect(
+        audioEngine,
+        polyrhythmAudioOptions
+    ) {
+        audioEngine.updatePolyrhythmOptions(
+            polyrhythmAudioOptions
+        )
+    }
+
+    LaunchedEffect(
         audioEngine, bpm
     ) {
         audioEngine.updateBpm(bpm)
@@ -229,48 +281,78 @@ private fun TrainerScreen(
         timeSignature,
         exerciseMeasuresPerSubdivision,
         myExerciseSubdivisions,
-        myExerciseMeasuresPerSubdivision
+        myExerciseMeasuresPerSubdivision,
+        polyrhythmLayerA,
+        polyrhythmLayerB
     ) {
         if (isRunning) {
-            audioEngine.start(
-                bpm = bpm,
-                subdivision =
-                    when (trainerMode) {
-                        TrainerMode.BASIC -> {
-                            subdivision
-                        }
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                audioEngine.startPolyrhythm(
+                    bpm = bpm,
+                    layerA = polyrhythmLayerA,
+                    layerB = polyrhythmLayerB,
+                    timeSignature = timeSignature,
+                    initialOptions =
+                        polyrhythmAudioOptions
+                )
+            } else {
+                audioEngine.start(
+                    bpm = bpm,
+                    subdivision =
+                        when (trainerMode) {
+                            TrainerMode.BASIC -> {
+                                subdivision
+                            }
 
-                        TrainerMode.PYRAMID_EXERCISE -> {
-                            1
-                        }
+                            TrainerMode.PYRAMID_EXERCISE -> {
+                                1
+                            }
 
-                        TrainerMode.MY_EXERCISE -> {
-                            myExerciseSequence.firstOrNull() ?: 1
-                        }
-                    },
-                timeSignature = timeSignature,
-                initialOptions = audioOptions,
-                exerciseMeasuresPerSubdivision =
-                    when (trainerMode) {
-                        TrainerMode.BASIC -> {
+                            TrainerMode.MY_EXERCISE -> {
+                                myExerciseSequence
+                                    .firstOrNull() ?: 1
+                            }
+
+                            TrainerMode.POLYRHYTHM -> {
+                                1
+                            }
+                        },
+                    timeSignature =
+                        timeSignature,
+                    initialOptions =
+                        audioOptions,
+                    exerciseMeasuresPerSubdivision =
+                        when (trainerMode) {
+                            TrainerMode.BASIC -> {
+                                null
+                            }
+
+                            TrainerMode.PYRAMID_EXERCISE -> {
+                                exerciseMeasuresPerSubdivision
+                            }
+
+                            TrainerMode.MY_EXERCISE -> {
+                                myExerciseMeasuresPerSubdivision
+                            }
+
+                            TrainerMode.POLYRHYTHM -> {
+                                null
+                            }
+                        },
+                    exerciseSequence =
+                        if (
+                            trainerMode ==
+                            TrainerMode.MY_EXERCISE
+                        ) {
+                            myExerciseSequence
+                        } else {
                             null
                         }
-
-                        TrainerMode.PYRAMID_EXERCISE -> {
-                            exerciseMeasuresPerSubdivision
-                        }
-
-                        TrainerMode.MY_EXERCISE -> {
-                            myExerciseMeasuresPerSubdivision
-                        }
-                    },
-                exerciseSequence =
-                    if (trainerMode == TrainerMode.MY_EXERCISE) {
-                        myExerciseSequence
-                    } else {
-                        null
-                    }
-            )
+                )
+            }
         } else {
             audioEngine.stop()
         }
@@ -278,15 +360,51 @@ private fun TrainerScreen(
 
 
     LaunchedEffect(
-        isRunning, trainerMode, subdivision, timeSignature
+        isRunning,
+        trainerMode,
+        subdivision,
+        timeSignature,
+        polyrhythmLayerA,
+        polyrhythmLayerB
     ) {
         if (!isRunning) {
             activeStep = -1
+            activePolyrhythmLayerA = -1
+            activePolyrhythmLayerB = -1
             currentBeatIndex = -1
             return@LaunchedEffect
         }
 
-        activeStep = 0
+        activeStep =
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                -1
+            } else {
+                0
+            }
+
+        activePolyrhythmLayerA =
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                0
+            } else {
+                -1
+            }
+
+        activePolyrhythmLayerB =
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                0
+            } else {
+                -1
+            }
+
         currentBeatIndex = 0
 
 
@@ -303,6 +421,10 @@ private fun TrainerScreen(
                 TrainerMode.MY_EXERCISE -> {
                     myExerciseSequence.firstOrNull() ?: 1
                 }
+
+                TrainerMode.POLYRHYTHM -> {
+                    1
+                }
             }
 
         if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
@@ -317,7 +439,12 @@ private fun TrainerScreen(
             myExerciseMeasure = 1
         }
 
-        var beatDurationNanos = 60_000_000_000L / currentBpm
+        var beatDurationNanos =
+            RhythmAudioTiming.beatDurationNanos(
+                bpm = currentBpm,
+                denominator =
+                    timeSignature.denominator
+            )
 
         var beatStartTimeNanos = withFrameNanos { it }
 
@@ -342,7 +469,15 @@ private fun TrainerScreen(
 
                             beatStartTimeNanos = frameTimeNanos
 
-                            beatDurationNanos = 60_000_000_000L / currentBpm
+                            beatDurationNanos =
+                                RhythmAudioTiming
+                                    .beatDurationNanos(
+                                        bpm =
+                                            currentBpm,
+                                        denominator =
+                                            timeSignature
+                                                .denominator
+                                    )
 
                             activeStep = 0
 
@@ -386,15 +521,65 @@ private fun TrainerScreen(
                 while (elapsedInBeat >= beatDurationNanos) {
                     beatStartTimeNanos += beatDurationNanos
 
-                    beatDurationNanos = 60_000_000_000L / currentBpm
+                    beatDurationNanos =
+                        RhythmAudioTiming
+                            .beatDurationNanos(
+                                bpm = currentBpm,
+                                denominator =
+                                    timeSignature
+                                        .denominator
+                            )
 
-                    elapsedInBeat = frameTimeNanos - beatStartTimeNanos
+                    elapsedInBeat =
+                        frameTimeNanos -
+                                beatStartTimeNanos
                 }
 
-                activeStep =
-                    ((elapsedInBeat * visualSubdivision) / beatDurationNanos).toInt().coerceIn(
-                        0, visualSubdivision - 1
-                    )
+                if (
+                    trainerMode ==
+                    TrainerMode.POLYRHYTHM
+                ) {
+                    activeStep = -1
+
+                    activePolyrhythmLayerA =
+                        (
+                                elapsedInBeat *
+                                        polyrhythmLayerA /
+                                        beatDurationNanos
+                                )
+                            .toInt()
+                            .coerceIn(
+                                0,
+                                polyrhythmLayerA - 1
+                            )
+
+                    activePolyrhythmLayerB =
+                        (
+                                elapsedInBeat *
+                                        polyrhythmLayerB /
+                                        beatDurationNanos
+                                )
+                            .toInt()
+                            .coerceIn(
+                                0,
+                                polyrhythmLayerB - 1
+                            )
+                } else {
+                    activePolyrhythmLayerA = -1
+                    activePolyrhythmLayerB = -1
+
+                    activeStep =
+                        (
+                                elapsedInBeat *
+                                        visualSubdivision /
+                                        beatDurationNanos
+                                )
+                            .toInt()
+                            .coerceIn(
+                                0,
+                                visualSubdivision - 1
+                            )
+                }
             }
         }
     }
@@ -507,8 +692,24 @@ private fun TrainerScreen(
                     branch = "└──",
                     label = "Polyrhythm",
                     isLast = true,
-                    enabled = false,
-                    onClick = {})
+                    selected =
+                        trainerMode ==
+                                TrainerMode.POLYRHYTHM,
+                    onClick = {
+                        if (
+                            trainerMode !=
+                            TrainerMode.POLYRHYTHM
+                        ) {
+                            isRunning = false
+                            activeStep = -1
+                            trainerMode =
+                                TrainerMode.POLYRHYTHM
+                        }
+
+                        coroutineScope.launch {
+                            drawerState.close()
+                        }
+                    })
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -634,6 +835,22 @@ private fun TrainerScreen(
                         }
                     )
                 }
+
+                TrainerMode.POLYRHYTHM -> {
+                    PolyrhythmSection(
+                        layerA = polyrhythmLayerA,
+                        layerB = polyrhythmLayerB,
+                        isRunning = isRunning,
+                        onLayerAChange = {
+                            polyrhythmLayerA =
+                                it.coerceIn(2, 8)
+                        },
+                        onLayerBChange = {
+                            polyrhythmLayerB =
+                                it.coerceIn(2, 8)
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -644,13 +861,38 @@ private fun TrainerScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            PracticeSection(
-                subdivision = displayedSubdivision,
-                activeStep = activeStep,
-                timeSignature = timeSignature,
-                currentBeatIndex = currentBeatIndex,
-                modifier = Modifier.weight(1f)
-            )
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                PolyrhythmPracticeSection(
+                    layerA = polyrhythmLayerA,
+                    layerB = polyrhythmLayerB,
+                    activeLayerA =
+                        activePolyrhythmLayerA,
+                    activeLayerB =
+                        activePolyrhythmLayerB,
+                    timeSignature =
+                        timeSignature,
+                    currentBeatIndex =
+                        currentBeatIndex,
+                    isRunning = isRunning,
+                    modifier =
+                        Modifier.weight(1f)
+                )
+            } else {
+                PracticeSection(
+                    subdivision =
+                        displayedSubdivision,
+                    activeStep = activeStep,
+                    timeSignature =
+                        timeSignature,
+                    currentBeatIndex =
+                        currentBeatIndex,
+                    modifier =
+                        Modifier.weight(1f)
+                )
+            }
 
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant
@@ -658,15 +900,52 @@ private fun TrainerScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            AudioControls(
-                metronomeEnabled = metronomeEnabled,
-                metronomeSound = metronomeSound,
-                onMetronomeChanged = { metronomeEnabled = it },
-                onMetronomeSoundChanged = { metronomeSound = it },
-                guideEnabled = guideEnabled,
-                guideSound = guideSound,
-                onGuideChanged = { guideEnabled = it },
-                onGuideSoundChanged = { guideSound = it })
+            if (
+                trainerMode ==
+                TrainerMode.POLYRHYTHM
+            ) {
+                PolyrhythmAudioControls(
+                    metronomeEnabled =
+                        polyrhythmMetronomeEnabled,
+                    layerAEnabled =
+                        polyrhythmLayerAEnabled,
+                    layerBEnabled =
+                        polyrhythmLayerBEnabled,
+                    onMetronomeChanged = {
+                        polyrhythmMetronomeEnabled =
+                            it
+                    },
+                    onLayerAChanged = {
+                        polyrhythmLayerAEnabled =
+                            it
+                    },
+                    onLayerBChanged = {
+                        polyrhythmLayerBEnabled =
+                            it
+                    }
+                )
+            } else {
+                AudioControls(
+                    metronomeEnabled =
+                        metronomeEnabled,
+                    metronomeSound =
+                        metronomeSound,
+                    onMetronomeChanged = {
+                        metronomeEnabled = it
+                    },
+                    onMetronomeSoundChanged = {
+                        metronomeSound = it
+                    },
+                    guideEnabled = guideEnabled,
+                    guideSound = guideSound,
+                    onGuideChanged = {
+                        guideEnabled = it
+                    },
+                    onGuideSoundChanged = {
+                        guideSound = it
+                    }
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -699,6 +978,11 @@ private fun TrainerScreen(
                                         .firstOrNull() ?: 1
                                 myExerciseMeasure = 1
                             }
+
+                            TrainerMode.POLYRHYTHM -> {
+                                activePolyrhythmLayerA = 0
+                                activePolyrhythmLayerB = 0
+                            }
                         }
 
                         isRunning = true
@@ -729,6 +1013,11 @@ private fun TrainerScreen(
                         trainerMode ==
                                 TrainerMode.MY_EXERCISE -> {
                             "▶  START MY EXERCISE"
+                        }
+
+                        trainerMode ==
+                                TrainerMode.POLYRHYTHM -> {
+                            "▶  START POLYRHYTHM"
                         }
 
                         else -> {
@@ -764,19 +1053,10 @@ private fun DrawerTreeItem(
         }
     }
 
-    val guideColor = when {
-        selected -> {
-            MaterialTheme.colorScheme.primary
-        }
-
-        enabled -> {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-        }
-
-        else -> {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
-        }
-    }
+    val guideColor =
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = 0.28f
+        )
 
     Row(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) {
@@ -966,53 +1246,84 @@ private fun TimeSignatureDropdown(
     onTimeSignatureSelected: (TimeSignature) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember {
+        mutableStateOf(false)
+    }
 
     Box(
         modifier = modifier
     ) {
         TextButton(
-            onClick = { expanded = true },
-            modifier = Modifier.width(68.dp).height(44.dp).border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(10.dp)
-            ),
+            onClick = {
+                expanded = true
+            },
+            modifier = Modifier
+                .width(68.dp)
+                .height(44.dp)
+                .border(
+                    width = 1.dp,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .outlineVariant,
+                    shape =
+                        RoundedCornerShape(10.dp)
+                ),
             shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+            contentPadding =
+                PaddingValues(
+                    horizontal = 10.dp,
+                    vertical = 0.dp
+                )
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment =
+                    Alignment.CenterVertically,
+                horizontalArrangement =
+                    Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = selectedTimeSignature.label,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text =
+                        selectedTimeSignature.label,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurface,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight =
+                        FontWeight.SemiBold
                 )
 
-                val chevronColor = MaterialTheme.colorScheme.onSurfaceVariant
+                val chevronColor =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant
 
                 Canvas(
                     modifier = Modifier.size(14.dp)
                 ) {
                     val path = Path().apply {
                         moveTo(
-                            x = size.width * 0.25f, y = size.height * 0.40f
+                            x = size.width * 0.25f,
+                            y = size.height * 0.40f
                         )
                         lineTo(
-                            x = size.width * 0.50f, y = size.height * 0.65f
+                            x = size.width * 0.50f,
+                            y = size.height * 0.65f
                         )
                         lineTo(
-                            x = size.width * 0.75f, y = size.height * 0.40f
+                            x = size.width * 0.75f,
+                            y = size.height * 0.40f
                         )
                     }
 
                     drawPath(
-                        path = path, color = chevronColor, style = Stroke(
-                            width = 1.5.dp.toPx(), cap = StrokeCap.Round
+                        path = path,
+                        color = chevronColor,
+                        style = Stroke(
+                            width = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
                         )
                     )
                 }
@@ -1020,16 +1331,257 @@ private fun TimeSignatureDropdown(
         }
 
         DropdownMenu(
-            expanded = expanded, onDismissRequest = { expanded = false }) {
-            TimeSignature.entries.forEach { timeSignature ->
-                DropdownMenuItem(text = {
+            expanded = expanded,
+            onDismissRequest = {
+                expanded = false
+            },
+            modifier = Modifier.width(220.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(
+                    horizontal = 12.dp,
+                    vertical = 8.dp
+                )
+            ) {
+                Text(
+                    text = "TIME SIGNATURE",
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant,
+                    fontSize = 10.sp,
+                    fontWeight =
+                        FontWeight.SemiBold,
+                    letterSpacing = 1.sp
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(10.dp)
+                )
+
+                Text(
+                    text = "Numerator",
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant,
+                    fontSize = 11.sp,
+                    fontWeight =
+                        FontWeight.Medium
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(4.dp)
+                )
+
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    verticalAlignment =
+                        Alignment.CenterVertically,
+                    horizontalArrangement =
+                        Arrangement.SpaceBetween
+                ) {
+                    TextButton(
+                        onClick = {
+                            onTimeSignatureSelected(
+                                TimeSignature(
+                                    numerator =
+                                        (
+                                                selectedTimeSignature
+                                                    .numerator - 1
+                                                ).coerceAtLeast(
+                                                TimeSignature
+                                                    .MIN_NUMERATOR
+                                            ),
+                                    denominator =
+                                        selectedTimeSignature
+                                            .denominator
+                                )
+                            )
+                        },
+                        enabled =
+                            selectedTimeSignature
+                                .numerator >
+                                    TimeSignature
+                                        .MIN_NUMERATOR,
+                        modifier =
+                            Modifier.size(36.dp),
+                        contentPadding =
+                            PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = "−",
+                            fontSize = 20.sp
+                        )
+                    }
+
                     Text(
-                        text = timeSignature.label, fontSize = 13.sp
+                        text =
+                            selectedTimeSignature
+                                .numerator
+                                .toString(),
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurface,
+                        fontSize = 20.sp,
+                        fontWeight =
+                            FontWeight.SemiBold
                     )
-                }, onClick = {
-                    onTimeSignatureSelected(timeSignature)
-                    expanded = false
-                })
+
+                    TextButton(
+                        onClick = {
+                            onTimeSignatureSelected(
+                                TimeSignature(
+                                    numerator =
+                                        (
+                                                selectedTimeSignature
+                                                    .numerator + 1
+                                                ).coerceAtMost(
+                                                TimeSignature
+                                                    .MAX_NUMERATOR
+                                            ),
+                                    denominator =
+                                        selectedTimeSignature
+                                            .denominator
+                                )
+                            )
+                        },
+                        enabled =
+                            selectedTimeSignature
+                                .numerator <
+                                    TimeSignature
+                                        .MAX_NUMERATOR,
+                        modifier =
+                            Modifier.size(36.dp),
+                        contentPadding =
+                            PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = "+",
+                            fontSize = 18.sp
+                        )
+                    }
+                }
+
+                Spacer(
+                    modifier =
+                        Modifier.height(10.dp)
+                )
+
+                Text(
+                    text = "Denominator",
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant,
+                    fontSize = 11.sp,
+                    fontWeight =
+                        FontWeight.Medium
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(6.dp)
+                )
+
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(4.dp)
+                ) {
+                    TimeSignature
+                        .SUPPORTED_DENOMINATORS
+                        .forEach { denominator ->
+                            val selected =
+                                denominator ==
+                                        selectedTimeSignature
+                                            .denominator
+
+                            TextButton(
+                                onClick = {
+                                    onTimeSignatureSelected(
+                                        TimeSignature(
+                                            numerator =
+                                                selectedTimeSignature
+                                                    .numerator,
+                                            denominator =
+                                                denominator
+                                        )
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .background(
+                                        color =
+                                            if (selected) {
+                                                MaterialTheme
+                                                    .colorScheme
+                                                    .primaryContainer
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                        shape =
+                                            RoundedCornerShape(
+                                                8.dp
+                                            )
+                                    ),
+                                contentPadding =
+                                    PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    text =
+                                        denominator
+                                            .toString(),
+                                    color =
+                                        if (selected) {
+                                            MaterialTheme
+                                                .colorScheme
+                                                .primary
+                                        } else {
+                                            MaterialTheme
+                                                .colorScheme
+                                                .onSurfaceVariant
+                                        },
+                                    fontSize = 12.sp,
+                                    fontWeight =
+                                        if (selected) {
+                                            FontWeight
+                                                .SemiBold
+                                        } else {
+                                            FontWeight
+                                                .Medium
+                                        }
+                                )
+                            }
+                        }
+                }
+
+                Spacer(
+                    modifier =
+                        Modifier.height(6.dp)
+                )
+
+                Text(
+                    text =
+                        selectedTimeSignature.label,
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurface,
+                    fontSize = 13.sp,
+                    fontWeight =
+                        FontWeight.SemiBold,
+                    textAlign =
+                        TextAlign.Center
+                )
             }
         }
     }
@@ -1056,19 +1608,26 @@ private fun SubdivisionSection(
                     val selected = subdivision == selectedSubdivision
 
                     Box(
-                        modifier = Modifier.weight(1f).height(40.dp).clickable {
-                            onSubdivisionSelected(subdivision)
-                        }, contentAlignment = Alignment.Center
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Box(
-                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp))
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(9.dp))
                                 .background(
                                     if (selected) {
                                         MaterialTheme.colorScheme.primaryContainer
                                     } else {
                                         Color.Transparent
                                     }
-                                ), contentAlignment = Alignment.Center
+                                )
+                                .clickable {
+                                    onSubdivisionSelected(subdivision)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = subdivision.toString(), color = if (selected) {
@@ -1152,14 +1711,7 @@ private fun MyExerciseSection(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(32.dp)
-                            .clickable(
-                                enabled = !isRunning
-                            ) {
-                                onSubdivisionToggle(
-                                    subdivision
-                                )
-                            },
+                            .height(32.dp),
                         contentAlignment =
                             Alignment.Center
                     ) {
@@ -1179,7 +1731,14 @@ private fun MyExerciseSection(
                                     } else {
                                         Color.Transparent
                                     }
-                                ),
+                                )
+                                .clickable(
+                                    enabled = !isRunning
+                                ) {
+                                    onSubdivisionToggle(
+                                        subdivision
+                                    )
+                                },
                             contentAlignment =
                                 Alignment.Center
                         ) {
@@ -1501,6 +2060,328 @@ private fun PyramidExerciseSection(
 }
 
 @Composable
+private fun PolyrhythmSection(
+    layerA: Int,
+    layerB: Int,
+    isRunning: Boolean,
+    onLayerAChange: (Int) -> Unit,
+    onLayerBChange: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        SectionLabel("POLYRHYTHM")
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment =
+                Alignment.CenterVertically,
+            horizontalArrangement =
+                Arrangement.Center
+        ) {
+            PolyrhythmRatioControl(
+                label = "Layer A",
+                value = layerA,
+                enabled = !isRunning,
+                onValueChange = onLayerAChange
+            )
+
+            Text(
+                text = ":",
+                modifier =
+                    Modifier.padding(
+                        horizontal = 18.dp
+                    ),
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurface,
+                fontSize = 24.sp,
+                fontWeight =
+                    FontWeight.Medium
+            )
+
+            PolyrhythmRatioControl(
+                label = "Layer B",
+                value = layerB,
+                enabled = !isRunning,
+                onValueChange = onLayerBChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = "$layerA : $layerB",
+            modifier = Modifier.fillMaxWidth(),
+            color =
+                MaterialTheme.colorScheme.primary,
+            fontSize = 13.sp,
+            fontWeight =
+                FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun PolyrhythmRatioControl(
+    label: String,
+    value: Int,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit
+) {
+    Column(
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = label,
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurfaceVariant,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Row(
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = {
+                    onValueChange(value - 1)
+                },
+                enabled =
+                    enabled && value > 2,
+                contentPadding =
+                    PaddingValues(0.dp),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Text(
+                    text = "−",
+                    fontSize = 20.sp
+                )
+            }
+
+            Text(
+                text = value.toString(),
+                modifier =
+                    Modifier.width(28.dp),
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurface,
+                fontSize = 20.sp,
+                fontWeight =
+                    FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+
+            TextButton(
+                onClick = {
+                    onValueChange(value + 1)
+                },
+                enabled =
+                    enabled && value < 8,
+                contentPadding =
+                    PaddingValues(0.dp),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Text(
+                    text = "+",
+                    fontSize = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PolyrhythmPracticeSection(
+    layerA: Int,
+    layerB: Int,
+    activeLayerA: Int,
+    activeLayerB: Int,
+    timeSignature: TimeSignature,
+    currentBeatIndex: Int,
+    isRunning: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+    ) {
+        SectionLabel("PRACTICE")
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        PolyrhythmTimelineRow(
+            label = "METRONOME",
+            detail =
+                if (currentBeatIndex >= 0) {
+                    "Beat " +
+                            "${currentBeatIndex + 1}/" +
+                            "${timeSignature.numerator}"
+                } else {
+                    "Reference"
+                },
+            pulseCount = 1,
+            activeStep =
+                if (isRunning) {
+                    0
+                } else {
+                    -1
+                }
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        PolyrhythmTimelineRow(
+            label = "LAYER A",
+            detail = "$layerA PULSES",
+            pulseCount = layerA,
+            activeStep = activeLayerA
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        PolyrhythmTimelineRow(
+            label = "LAYER B",
+            detail = "$layerB PULSES",
+            pulseCount = layerB,
+            activeStep = activeLayerB
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun PolyrhythmTimelineRow(
+    label: String,
+    detail: String,
+    pulseCount: Int,
+    activeStep: Int
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.SpaceBetween,
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant,
+                fontSize = 11.sp,
+                fontWeight =
+                    FontWeight.SemiBold,
+                letterSpacing = 1.sp
+            )
+
+            Text(
+                text = detail,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onSurfaceVariant,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        Spacer(modifier = Modifier.height(7.dp))
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(18.dp)
+        ) {
+            val timelineStart = 18.dp
+            val timelineDuration =
+                maxWidth - timelineStart
+
+            BeatWaveform(
+                beatCount = pulseCount,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = timelineStart)
+            )
+
+            for (
+            pulseIndex in
+            0 until pulseCount
+            ) {
+                val progress =
+                    pulseIndex.toFloat() /
+                            pulseCount.toFloat()
+
+                val position =
+                    timelineStart +
+                            (
+                                    timelineDuration *
+                                            progress
+                                    )
+
+                val active =
+                    activeStep == pulseIndex
+
+                Box(
+                    modifier = Modifier
+                        .offset(
+                            x =
+                                position -
+                                        7.5.dp
+                        )
+                        .align(
+                            Alignment.CenterStart
+                        )
+                        .size(15.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (active) {
+                                MaterialTheme
+                                    .colorScheme
+                                    .primary
+                            } else {
+                                Color.Transparent
+                            }
+                        )
+                        .border(
+                            width = 1.dp,
+                            color =
+                                if (active) {
+                                    MaterialTheme
+                                        .colorScheme
+                                        .primary
+                                } else {
+                                    MaterialTheme
+                                        .colorScheme
+                                        .primary
+                                        .copy(
+                                            alpha = 0.55f
+                                        )
+                                },
+                            shape = CircleShape
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PracticeSection(
     subdivision: Int,
     activeStep: Int,
@@ -1557,8 +2438,14 @@ private fun PracticeSection(
                     modifier = Modifier.fillMaxWidth().height(18.dp)
                 ) {
                     val timelineStart = 18.dp
-                    val timelineDuration = maxWidth - timelineStart
-                    val beatMarkerSize = 15.dp
+                    val timelineDuration =
+                        maxWidth - timelineStart
+                    val beatMarkerSize =
+                        if (beatCount <= 12) {
+                            15.dp
+                        } else {
+                            10.dp
+                        }
 
                     BeatWaveform(
                         beatCount = beatCount,
@@ -1750,6 +2637,93 @@ private fun PracticeStep(
             } else {
                 FontWeight.Medium
             }, textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun PolyrhythmAudioControls(
+    metronomeEnabled: Boolean,
+    layerAEnabled: Boolean,
+    layerBEnabled: Boolean,
+    onMetronomeChanged: (Boolean) -> Unit,
+    onLayerAChanged: (Boolean) -> Unit,
+    onLayerBChanged: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.spacedBy(8.dp)
+    ) {
+        PolyrhythmAudioControl(
+            label = "Metronome",
+            sound = "Click",
+            checked = metronomeEnabled,
+            onCheckedChange =
+                onMetronomeChanged,
+            modifier = Modifier.weight(1f)
+        )
+
+        PolyrhythmAudioControl(
+            label = "Layer A",
+            sound = "Wood",
+            checked = layerAEnabled,
+            onCheckedChange =
+                onLayerAChanged,
+            modifier = Modifier.weight(1f)
+        )
+
+        PolyrhythmAudioControl(
+            label = "Layer B",
+            sound = "Block",
+            checked = layerBEnabled,
+            onCheckedChange =
+                onLayerBChanged,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun PolyrhythmAudioControl(
+    label: String,
+    sound: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment =
+            Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = label,
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurface,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = sound,
+            color =
+                MaterialTheme
+                    .colorScheme
+                    .onSurfaceVariant,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Switch(
+            checked = checked,
+            onCheckedChange =
+                onCheckedChange
         )
     }
 }

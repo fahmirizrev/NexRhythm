@@ -8,6 +8,7 @@ import android.media.AudioTrack
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 internal enum class MetronomeSoundMode(
     val label: String
@@ -24,18 +25,36 @@ internal enum class GuideSoundMode(
     SYLLABLES("Syllables")
 }
 
-internal enum class TimeSignature(
+internal data class TimeSignature(
     val numerator: Int,
     val denominator: Int
 ) {
-    TWO_FOUR(2, 4),
-    THREE_FOUR(3, 4),
-    FOUR_FOUR(4, 4),
-    FIVE_FOUR(5, 4),
-    SEVEN_FOUR(7, 4);
+    init {
+        require(
+            numerator in MIN_NUMERATOR..MAX_NUMERATOR
+        )
+
+        require(
+            denominator in SUPPORTED_DENOMINATORS
+        )
+    }
 
     val label: String
         get() = "$numerator/$denominator"
+
+    companion object {
+        const val MIN_NUMERATOR = 2
+        const val MAX_NUMERATOR = 24
+
+        val SUPPORTED_DENOMINATORS =
+            listOf(2, 4, 8, 16)
+
+        val TWO_FOUR = TimeSignature(2, 4)
+        val THREE_FOUR = TimeSignature(3, 4)
+        val FOUR_FOUR = TimeSignature(4, 4)
+        val FIVE_FOUR = TimeSignature(5, 4)
+        val SEVEN_FOUR = TimeSignature(7, 4)
+    }
 }
 
 internal data class RhythmAudioOptions(
@@ -43,6 +62,12 @@ internal data class RhythmAudioOptions(
     val metronomeSound: MetronomeSoundMode,
     val guideEnabled: Boolean,
     val guideSound: GuideSoundMode
+)
+
+internal data class PolyrhythmAudioOptions(
+    val metronomeEnabled: Boolean,
+    val layerAEnabled: Boolean,
+    val layerBEnabled: Boolean
 )
 
 internal enum class ExerciseDirection {
@@ -70,12 +95,47 @@ internal object RhythmAudioTiming {
 
     const val SAMPLE_RATE = 48_000
 
-    fun beatFrames(bpm: Int): Int {
-        val safeBpm = bpm.coerceAtLeast(1)
+    fun beatFrames(
+        bpm: Int,
+        denominator: Int = 4
+    ): Int {
+        val safeBpm =
+            bpm.coerceAtLeast(1)
+
+        require(
+            denominator in
+                    TimeSignature.SUPPORTED_DENOMINATORS
+        )
 
         return (
-                SAMPLE_RATE * 60.0 / safeBpm
-                ).roundToInt().coerceAtLeast(1)
+                SAMPLE_RATE *
+                        60.0 /
+                        safeBpm *
+                        4.0 /
+                        denominator
+                ).roundToInt()
+            .coerceAtLeast(1)
+    }
+
+    fun beatDurationNanos(
+        bpm: Int,
+        denominator: Int = 4
+    ): Long {
+        val safeBpm =
+            bpm.coerceAtLeast(1)
+
+        require(
+            denominator in
+                    TimeSignature.SUPPORTED_DENOMINATORS
+        )
+
+        return (
+                60_000_000_000.0 /
+                        safeBpm *
+                        4.0 /
+                        denominator
+                ).roundToLong()
+            .coerceAtLeast(1L)
     }
 
     fun subdivisionOffsets(
@@ -87,6 +147,21 @@ internal object RhythmAudioTiming {
         return IntArray(safeSubdivision) { index ->
             (
                     beatFrames.toLong() * index / safeSubdivision
+                    ).toInt()
+        }
+    }
+
+    fun polyrhythmOffsets(
+        beatFrames: Int,
+        pulseCount: Int
+    ): IntArray {
+        require(pulseCount in 2..8)
+
+        return IntArray(pulseCount) { index ->
+            (
+                    beatFrames.toLong() *
+                            index /
+                            pulseCount
                     ).toInt()
         }
     }
@@ -307,6 +382,14 @@ internal class RhythmAudioEngine(
         )
     )
 
+    private val polyrhythmOptions = AtomicReference(
+        PolyrhythmAudioOptions(
+            metronomeEnabled = true,
+            layerAEnabled = true,
+            layerBEnabled = true
+        )
+    )
+
     private val generation = AtomicInteger(0)
     private val currentBpm = AtomicInteger(60)
 
@@ -332,6 +415,12 @@ internal class RhythmAudioEngine(
         newOptions: RhythmAudioOptions
     ) {
         options.set(newOptions)
+    }
+
+    fun updatePolyrhythmOptions(
+        newOptions: PolyrhythmAudioOptions
+    ) {
+        polyrhythmOptions.set(newOptions)
     }
 
     fun updateBpm(
@@ -444,6 +533,59 @@ internal class RhythmAudioEngine(
 
 
     @Synchronized
+    fun startPolyrhythm(
+        bpm: Int,
+        layerA: Int,
+        layerB: Int,
+        timeSignature: TimeSignature,
+        initialOptions: PolyrhythmAudioOptions
+    ) {
+        stopLocked()
+
+        currentBpm.set(
+            bpm.coerceAtLeast(1)
+        )
+
+        val safeLayerA =
+            layerA.coerceIn(2, 8)
+
+        val safeLayerB =
+            layerB.coerceIn(2, 8)
+
+        polyrhythmOptions.set(
+            initialOptions
+        )
+
+        playbackState.set(
+            RhythmPlaybackState(
+                subdivision = 1,
+                beatIndex = 0,
+                exerciseMeasure = null,
+                exerciseDirection = null,
+                exerciseComplete = false
+            )
+        )
+
+        val runId =
+            generation.incrementAndGet()
+
+        worker = Thread(
+            {
+                renderPolyrhythmLoop(
+                    runId = runId,
+                    layerA = safeLayerA,
+                    layerB = safeLayerB,
+                    timeSignature = timeSignature
+                )
+            },
+            "NexRhythmPolyrhythmAudio"
+        ).apply {
+            priority = Thread.MAX_PRIORITY
+            start()
+        }
+    }
+
+    @Synchronized
     fun stop() {
         stopLocked()
     }
@@ -546,7 +688,9 @@ internal class RhythmAudioEngine(
             while (isCurrent(runId)) {
                 val beatFrames =
                     RhythmAudioTiming.beatFrames(
-                        currentBpm.get()
+                        bpm = currentBpm.get(),
+                        denominator =
+                            timeSignature.denominator
                     )
 
                 val subdivisionOffsets =
@@ -569,10 +713,16 @@ internal class RhythmAudioEngine(
                     val beatSample =
                         when (currentOptions.metronomeSound) {
                             MetronomeSoundMode.CLICK ->
-                                sampleBank.beatClick
+                                if (beatIndex == 0) {
+                                    sampleBank.beatAccent
+                                } else {
+                                    sampleBank.beatClick
+                                }
 
                             MetronomeSoundMode.VOICE_COUNT ->
-                                sampleBank.counts[beatIndex]
+                                sampleBank.counts
+                                    .getOrNull(beatIndex)
+                                    ?: sampleBank.beatClick
                         }
 
                     mixSample(
@@ -753,6 +903,185 @@ internal class RhythmAudioEngine(
     }
 
 
+    private fun renderPolyrhythmLoop(
+        runId: Int,
+        layerA: Int,
+        layerB: Int,
+        timeSignature: TimeSignature
+    ) {
+        val maxSampleFrames =
+            sampleBank.maxSampleFrames
+
+        val carry =
+            IntArray(maxSampleFrames)
+
+        val writeBuffer =
+            ShortArray(WRITE_CHUNK_FRAMES)
+
+        var beatIndex = 0
+
+        val track = createAudioTrack()
+
+        currentTrack = track
+
+        try {
+            if (!isCurrent(runId)) {
+                return
+            }
+
+            track.play()
+
+            while (isCurrent(runId)) {
+                val beatFrames =
+                    RhythmAudioTiming.beatFrames(
+                        bpm = currentBpm.get(),
+                        denominator =
+                            timeSignature.denominator
+                    )
+
+                val layerAOffsets =
+                    RhythmAudioTiming
+                        .polyrhythmOffsets(
+                            beatFrames = beatFrames,
+                            pulseCount = layerA
+                        )
+
+                val layerBOffsets =
+                    RhythmAudioTiming
+                        .polyrhythmOffsets(
+                            beatFrames = beatFrames,
+                            pulseCount = layerB
+                        )
+
+                val mixBuffer =
+                    IntArray(
+                        beatFrames +
+                                maxSampleFrames
+                    )
+
+                carry.copyInto(
+                    destination = mixBuffer
+                )
+
+                val currentOptions =
+                    polyrhythmOptions.get()
+
+                if (
+                    currentOptions
+                        .metronomeEnabled
+                ) {
+                    val metronomeSample =
+                        if (beatIndex == 0) {
+                            sampleBank
+                                .polyMetronomeAccent
+                        } else {
+                            sampleBank
+                                .polyMetronomeClick
+                        }
+
+                    mixSample(
+                        target = mixBuffer,
+                        startFrame = 0,
+                        sample = metronomeSample,
+                        gain =
+                            POLYRHYTHM_METRONOME_GAIN
+                    )
+                }
+
+                if (
+                    currentOptions.layerAEnabled
+                ) {
+                    layerAOffsets.forEach { startFrame ->
+                        mixSample(
+                            target = mixBuffer,
+                            startFrame = startFrame,
+                            sample =
+                                sampleBank
+                                    .polyLayerAWood,
+                            gain =
+                                POLYRHYTHM_LAYER_GAIN
+                        )
+                    }
+                }
+
+                if (
+                    currentOptions.layerBEnabled
+                ) {
+                    layerBOffsets.forEach { startFrame ->
+                        mixSample(
+                            target = mixBuffer,
+                            startFrame = startFrame,
+                            sample =
+                                sampleBank
+                                    .polyLayerBBlock,
+                            gain =
+                                POLYRHYTHM_LAYER_GAIN
+                        )
+                    }
+                }
+
+                val completed =
+                    writeBeat(
+                        track = track,
+                        runId = runId,
+                        mixBuffer = mixBuffer,
+                        beatFrames = beatFrames,
+                        writeBuffer = writeBuffer
+                    )
+
+                if (!completed) {
+                    break
+                }
+
+                for (index in carry.indices) {
+                    carry[index] =
+                        mixBuffer[
+                            beatFrames + index
+                        ]
+                }
+
+                beatIndex =
+                    RhythmAudioTiming
+                        .nextBeatInMeasure(
+                            currentBeatIndex =
+                                beatIndex,
+                            timeSignature =
+                                timeSignature
+                        )
+
+                playbackState.set(
+                    RhythmPlaybackState(
+                        subdivision = 1,
+                        beatIndex = beatIndex,
+                        exerciseMeasure = null,
+                        exerciseDirection = null,
+                        exerciseComplete = false
+                    )
+                )
+            }
+        } finally {
+            runCatching {
+                track.pause()
+            }
+
+            runCatching {
+                track.flush()
+            }
+
+            runCatching {
+                track.stop()
+            }
+
+            runCatching {
+                track.release()
+            }
+
+            if (currentTrack === track) {
+                currentTrack = null
+            }
+        }
+    }
+
     private fun writeBeat(
         track: AudioTrack,
         runId: Int,
@@ -881,6 +1210,12 @@ internal class RhythmAudioEngine(
                 R.raw.beat_click
             )
 
+        val beatAccent =
+            loadPcm16MonoWav(
+                resources,
+                R.raw.beat_accent
+            )
+
         val guideWood =
             loadPcm16MonoWav(
                 resources,
@@ -891,6 +1226,30 @@ internal class RhythmAudioEngine(
             loadPcm16MonoWav(
                 resources,
                 R.raw.guide_snare
+            )
+
+        val polyMetronomeClick =
+            loadPcm16MonoWav(
+                resources,
+                R.raw.poly_metronome_click
+            )
+
+        val polyMetronomeAccent =
+            loadPcm16MonoWav(
+                resources,
+                R.raw.poly_metronome_accent
+            )
+
+        val polyLayerAWood =
+            loadPcm16MonoWav(
+                resources,
+                R.raw.poly_layer_a_wood
+            )
+
+        val polyLayerBBlock =
+            loadPcm16MonoWav(
+                resources,
+                R.raw.poly_layer_b_block
             )
 
         val counts = listOf(
@@ -951,8 +1310,13 @@ internal class RhythmAudioEngine(
         val maxSampleFrames: Int =
             buildList {
                 add(beatClick)
+                add(beatAccent)
                 add(guideWood)
                 add(guideSnare)
+                add(polyMetronomeClick)
+                add(polyMetronomeAccent)
+                add(polyLayerAWood)
+                add(polyLayerBBlock)
                 addAll(counts)
                 addAll(syllables.values)
             }.maxOf { sample ->
@@ -966,6 +1330,12 @@ internal class RhythmAudioEngine(
 
         private const val BEAT_GAIN = 0.68f
         private const val GUIDE_GAIN = 0.62f
+
+        private const val POLYRHYTHM_METRONOME_GAIN =
+            0.42f
+
+        private const val POLYRHYTHM_LAYER_GAIN =
+            0.40f
 
         private fun loadPcm16MonoWav(
             resources: Resources,
