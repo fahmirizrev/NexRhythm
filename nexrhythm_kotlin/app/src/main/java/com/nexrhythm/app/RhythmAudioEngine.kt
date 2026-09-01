@@ -175,73 +175,6 @@ internal object RhythmAudioTiming {
                 ) % timeSignature.numerator
     }
 
-    fun nextExerciseProgress(
-        currentSubdivision: Int,
-        currentMeasure: Int,
-        measuresPerSubdivision: Int,
-        currentDirection: ExerciseDirection
-    ): RhythmExerciseProgress {
-        val safeSubdivision =
-            currentSubdivision.coerceIn(1, 8)
-
-        val safeMeasuresPerSubdivision =
-            measuresPerSubdivision.coerceAtLeast(1)
-
-        val safeMeasure =
-            currentMeasure.coerceIn(
-                1,
-                safeMeasuresPerSubdivision
-            )
-
-        return when {
-            safeMeasure < safeMeasuresPerSubdivision -> {
-                RhythmExerciseProgress(
-                    subdivision = safeSubdivision,
-                    measure = safeMeasure + 1,
-                    direction = currentDirection,
-                    completed = false
-                )
-            }
-
-            currentDirection == ExerciseDirection.ASCENDING &&
-                    safeSubdivision < 8 -> {
-                RhythmExerciseProgress(
-                    subdivision = safeSubdivision + 1,
-                    measure = 1,
-                    direction = ExerciseDirection.ASCENDING,
-                    completed = false
-                )
-            }
-
-            currentDirection == ExerciseDirection.ASCENDING -> {
-                RhythmExerciseProgress(
-                    subdivision = 7,
-                    measure = 1,
-                    direction = ExerciseDirection.DESCENDING,
-                    completed = false
-                )
-            }
-
-            safeSubdivision > 1 -> {
-                RhythmExerciseProgress(
-                    subdivision = safeSubdivision - 1,
-                    measure = 1,
-                    direction = ExerciseDirection.DESCENDING,
-                    completed = false
-                )
-            }
-
-            else -> {
-                RhythmExerciseProgress(
-                    subdivision = 2,
-                    measure = 1,
-                    direction = ExerciseDirection.ASCENDING,
-                    completed = false
-                )
-            }
-        }
-    }
-
     fun nextCustomExerciseProgress(
         subdivisions: List<Int>,
         currentSubdivision: Int,
@@ -468,19 +401,9 @@ internal class RhythmAudioEngine(
         }
 
         val initialSubdivision =
-            when {
-                customExerciseSequence != null -> {
-                    customExerciseSequence.first()
-                }
-
-                exerciseMeasuresPerSubdivision != null -> {
-                    1
-                }
-
-                else -> {
-                    subdivision.coerceIn(1, 8)
-                }
-            }
+            customExerciseSequence
+                ?.first()
+                ?: subdivision.coerceIn(1, 8)
 
         playbackState.set(
             RhythmPlaybackState(
@@ -781,36 +704,23 @@ internal class RhythmAudioEngine(
 
                 if (
                     nextBeatIndex == 0 &&
-                    exerciseMeasures != null
+                    exerciseMeasures != null &&
+                    customExerciseSequence != null
                 ) {
                     val nextProgress =
-                        if (customExerciseSequence != null) {
-                            RhythmAudioTiming
-                                .nextCustomExerciseProgress(
-                                    subdivisions =
-                                        customExerciseSequence,
-                                    currentSubdivision =
-                                        currentSubdivision,
-                                    currentMeasure =
-                                        exerciseMeasure,
-                                    measuresPerSubdivision =
-                                        exerciseMeasures,
-                                    currentDirection =
-                                        exerciseDirection
-                                )
-                        } else {
-                            RhythmAudioTiming
-                                .nextExerciseProgress(
-                                    currentSubdivision =
-                                        currentSubdivision,
-                                    currentMeasure =
-                                        exerciseMeasure,
-                                    measuresPerSubdivision =
-                                        exerciseMeasures,
-                                    currentDirection =
-                                        exerciseDirection
-                                )
-                        }
+                        RhythmAudioTiming
+                            .nextCustomExerciseProgress(
+                                subdivisions =
+                                    customExerciseSequence,
+                                currentSubdivision =
+                                    currentSubdivision,
+                                currentMeasure =
+                                    exerciseMeasure,
+                                measuresPerSubdivision =
+                                    exerciseMeasures,
+                                currentDirection =
+                                    exerciseDirection
+                            )
 
                     currentSubdivision =
                         nextProgress.subdivision

@@ -1,9 +1,13 @@
 package com.nexrhythm.app
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -100,7 +104,6 @@ private enum class TrainerMode(
     val label: String
 ) {
     BASIC("Basic"),
-    PYRAMID_EXERCISE("Pyramid Exercise"),
     MY_EXERCISE("My Exercise"),
     POLYRHYTHM("Polyrhythm")
 }
@@ -122,19 +125,6 @@ private fun TrainerScreen(
     var bpm by remember { mutableIntStateOf(60) }
     var subdivision by remember { mutableIntStateOf(2) }
     var timeSignature by remember { mutableStateOf(TimeSignature.FOUR_FOUR) }
-
-    var exerciseMeasuresPerSubdivision by remember {
-        mutableIntStateOf(2)
-    }
-    var exerciseSubdivision by remember {
-        mutableIntStateOf(1)
-    }
-    var exerciseMeasure by remember {
-        mutableIntStateOf(1)
-    }
-    var exerciseDirection by remember {
-        mutableStateOf(ExerciseDirection.ASCENDING)
-    }
 
     var myExerciseSubdivisions by remember {
         mutableStateOf(
@@ -193,6 +183,66 @@ private fun TrainerScreen(
 
     val context = LocalContext.current
 
+    val rhythmAnalyzerLauncher =
+        rememberLauncherForActivityResult(
+            contract =
+                ActivityResultContracts
+                    .StartActivityForResult()
+        ) { result ->
+            if (
+                result.resultCode ==
+                Activity.RESULT_OK
+            ) {
+                result.data?.let { data ->
+                    bpm =
+                        data.getIntExtra(
+                            RhythmAnalyzerActivity
+                                .EXTRA_BPM,
+                            bpm
+                        )
+                            .coerceIn(
+                                40,
+                                240
+                            )
+
+                    val numerator =
+                        data.getIntExtra(
+                            RhythmAnalyzerActivity
+                                .EXTRA_NUMERATOR,
+                            timeSignature
+                                .numerator
+                        )
+
+                    val denominator =
+                        data.getIntExtra(
+                            RhythmAnalyzerActivity
+                                .EXTRA_DENOMINATOR,
+                            timeSignature
+                                .denominator
+                        )
+
+                    if (
+                        numerator in
+                        TimeSignature
+                            .MIN_NUMERATOR..
+                        TimeSignature
+                            .MAX_NUMERATOR &&
+                        denominator in
+                        TimeSignature
+                            .SUPPORTED_DENOMINATORS
+                    ) {
+                        timeSignature =
+                            TimeSignature(
+                                numerator =
+                                    numerator,
+                                denominator =
+                                    denominator
+                            )
+                    }
+                }
+            }
+        }
+
 
     val audioEngine = remember(context) {
         RhythmAudioEngine(
@@ -228,10 +278,6 @@ private fun TrainerScreen(
         when (trainerMode) {
             TrainerMode.BASIC -> {
                 subdivision
-            }
-
-            TrainerMode.PYRAMID_EXERCISE -> {
-                exerciseSubdivision
             }
 
             TrainerMode.MY_EXERCISE -> {
@@ -279,7 +325,6 @@ private fun TrainerScreen(
         trainerMode,
         subdivision,
         timeSignature,
-        exerciseMeasuresPerSubdivision,
         myExerciseSubdivisions,
         myExerciseMeasuresPerSubdivision,
         polyrhythmLayerA,
@@ -307,10 +352,6 @@ private fun TrainerScreen(
                                 subdivision
                             }
 
-                            TrainerMode.PYRAMID_EXERCISE -> {
-                                1
-                            }
-
                             TrainerMode.MY_EXERCISE -> {
                                 myExerciseSequence
                                     .firstOrNull() ?: 1
@@ -328,10 +369,6 @@ private fun TrainerScreen(
                         when (trainerMode) {
                             TrainerMode.BASIC -> {
                                 null
-                            }
-
-                            TrainerMode.PYRAMID_EXERCISE -> {
-                                exerciseMeasuresPerSubdivision
                             }
 
                             TrainerMode.MY_EXERCISE -> {
@@ -414,10 +451,6 @@ private fun TrainerScreen(
                     subdivision
                 }
 
-                TrainerMode.PYRAMID_EXERCISE -> {
-                    1
-                }
-
                 TrainerMode.MY_EXERCISE -> {
                     myExerciseSequence.firstOrNull() ?: 1
                 }
@@ -426,12 +459,6 @@ private fun TrainerScreen(
                     1
                 }
             }
-
-        if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-            exerciseSubdivision = 1
-            exerciseMeasure = 1
-            exerciseDirection = ExerciseDirection.ASCENDING
-        }
 
         if (trainerMode == TrainerMode.MY_EXERCISE) {
             myExerciseSubdivision =
@@ -453,38 +480,6 @@ private fun TrainerScreen(
                 val playbackState = audioEngine.playbackState()
 
                 currentBeatIndex = playbackState.beatIndex
-
-                if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
-                    if (playbackState.exerciseMeasure != null) {
-
-                        exerciseSubdivision = playbackState.subdivision
-
-                        exerciseMeasure = playbackState.exerciseMeasure
-
-                        exerciseDirection =
-                            playbackState.exerciseDirection ?: ExerciseDirection.ASCENDING
-
-                        if (playbackState.subdivision != visualSubdivision) {
-                            visualSubdivision = playbackState.subdivision
-
-                            beatStartTimeNanos = frameTimeNanos
-
-                            beatDurationNanos =
-                                RhythmAudioTiming
-                                    .beatDurationNanos(
-                                        bpm =
-                                            currentBpm,
-                                        denominator =
-                                            timeSignature
-                                                .denominator
-                                    )
-
-                            activeStep = 0
-
-                            return@withFrameNanos
-                        }
-                    }
-                }
 
                 if (
                     trainerMode == TrainerMode.MY_EXERCISE &&
@@ -646,25 +641,6 @@ private fun TrainerScreen(
 
                 DrawerTreeItem(
                     branch = "├──",
-                    label = "Pyramid Exercise",
-                    selected = trainerMode == TrainerMode.PYRAMID_EXERCISE,
-                    onClick = {
-                        if (trainerMode != TrainerMode.PYRAMID_EXERCISE) {
-                            isRunning = false
-                            activeStep = -1
-                            trainerMode = TrainerMode.PYRAMID_EXERCISE
-                            exerciseSubdivision = 1
-                            exerciseMeasure = 1
-                            exerciseDirection = ExerciseDirection.ASCENDING
-                        }
-
-                        coroutineScope.launch {
-                            drawerState.close()
-                        }
-                    })
-
-                DrawerTreeItem(
-                    branch = "├──",
                     label = "My Exercise",
                     selected =
                         trainerMode == TrainerMode.MY_EXERCISE,
@@ -710,26 +686,6 @@ private fun TrainerScreen(
                             drawerState.close()
                         }
                     })
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                Text(
-                    text = "TOOLS",
-                    modifier = Modifier.padding(
-                        horizontal = 28.dp, vertical = 6.dp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.sp
-                )
-
-                DrawerTreeItem(
-                    branch = "└──",
-                    label = "BPM Detector",
-                    isLast = true,
-                    enabled = false,
-                    onClick = {})
             }
         }) {
         Column(
@@ -752,11 +708,6 @@ private fun TrainerScreen(
                 onBpmChange = { bpm = it.coerceIn(40, 240) },
                 onTimeSignatureChange = { selectedTimeSignature ->
                     timeSignature = selectedTimeSignature
-
-                    if (trainerMode == TrainerMode.PYRAMID_EXERCISE && isRunning) {
-                        exerciseSubdivision = 1
-                        exerciseMeasure = 1
-                    }
                 })
 
 
@@ -774,24 +725,6 @@ private fun TrainerScreen(
                         selectedSubdivision = subdivision,
                         onSubdivisionSelected = {
                             subdivision = it
-                        }
-                    )
-                }
-
-                TrainerMode.PYRAMID_EXERCISE -> {
-                    PyramidExerciseSection(
-                        measuresPerSubdivision =
-                            exerciseMeasuresPerSubdivision,
-                        currentSubdivision =
-                            exerciseSubdivision,
-                        currentMeasure =
-                            exerciseMeasure,
-                        currentDirection =
-                            exerciseDirection,
-                        isRunning = isRunning,
-                        onMeasuresChange = { measures ->
-                            exerciseMeasuresPerSubdivision =
-                                measures.coerceIn(1, 8)
                         }
                     )
                 }
@@ -965,13 +898,6 @@ private fun TrainerScreen(
                                 Unit
                             }
 
-                            TrainerMode.PYRAMID_EXERCISE -> {
-                                exerciseSubdivision = 1
-                                exerciseMeasure = 1
-                                exerciseDirection =
-                                    ExerciseDirection.ASCENDING
-                            }
-
                             TrainerMode.MY_EXERCISE -> {
                                 myExerciseSubdivision =
                                     myExerciseSequence
@@ -1003,11 +929,6 @@ private fun TrainerScreen(
                     text = when {
                         isRunning -> {
                             "■  STOP"
-                        }
-
-                        trainerMode ==
-                                TrainerMode.PYRAMID_EXERCISE -> {
-                            "▶  START PYRAMID EXERCISE"
                         }
 
                         trainerMode ==
@@ -1889,173 +1810,6 @@ private fun MyExerciseSection(
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center
         )
-    }
-}
-
-@Composable
-private fun PyramidExerciseSection(
-    measuresPerSubdivision: Int,
-    currentSubdivision: Int,
-    currentMeasure: Int,
-    currentDirection: ExerciseDirection,
-    isRunning: Boolean,
-    onMeasuresChange: (Int) -> Unit
-) {
-    val nextSubdivision = when (currentDirection) {
-        ExerciseDirection.ASCENDING -> {
-            if (currentSubdivision < 8) {
-                currentSubdivision + 1
-            } else {
-                7
-            }
-        }
-
-        ExerciseDirection.DESCENDING -> {
-            if (currentSubdivision > 1) {
-                currentSubdivision - 1
-            } else {
-                null
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        SectionLabel("PYRAMID EXERCISE")
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Subdivision Ladder",
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            for (subdivision in 1..8) {
-                val selected = subdivision == currentSubdivision
-
-                Box(
-                    modifier = Modifier.size(24.dp).clip(RoundedCornerShape(7.dp)).background(
-                        if (selected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            Color.Transparent
-                        }
-                    ), contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = subdivision.toString(), color = if (selected) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }, fontSize = 12.sp, fontWeight = if (selected) {
-                            FontWeight.SemiBold
-                        } else {
-                            FontWeight.Medium
-                        }
-                    )
-                }
-
-                if (subdivision < 8) {
-                    Text(
-                        text = "→", modifier = Modifier.padding(
-                            horizontal = 1.dp
-                        ), color = MaterialTheme.colorScheme.outline, fontSize = 11.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth().height(40.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(
-                onClick = {
-                    onMeasuresChange(
-                        measuresPerSubdivision - 1
-                    )
-                },
-                enabled = !isRunning && measuresPerSubdivision > 1,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Text(
-                    text = "−", fontSize = 20.sp
-                )
-            }
-
-            Text(
-                text = buildString {
-                    append(measuresPerSubdivision)
-                    append(
-                        if (measuresPerSubdivision == 1) {
-                            " Measure"
-                        } else {
-                            " Measures"
-                        }
-                    )
-                },
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            TextButton(
-                onClick = {
-                    onMeasuresChange(
-                        measuresPerSubdivision + 1
-                    )
-                },
-                enabled = !isRunning && measuresPerSubdivision < 8,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(36.dp)
-            ) {
-                Text(
-                    text = "+", fontSize = 18.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Text(
-                text = if (currentDirection == ExerciseDirection.ASCENDING) {
-                    "Up"
-                } else {
-                    "Down"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Text(
-                text = if (nextSubdivision != null) {
-                    "Measure $currentMeasure/" + "$measuresPerSubdivision" + "  ·  Next $nextSubdivision"
-                } else {
-                    "Measure $currentMeasure/" + "$measuresPerSubdivision" + "  ·  Final"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.End
-            )
-        }
     }
 }
 
