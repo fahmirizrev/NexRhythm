@@ -1,2 +1,7 @@
 /.idea/
 /nexrhythm_kotlin/.idea/
+/patches/output/
+
+# Release signing material
+*.jks
+*.keystore
