@@ -119,4 +119,99 @@ class RhythmAudioTimingTest {
             )
         }
     }
+
+    @Test
+    fun exerciseStaysOnSubdivisionUntilConfiguredMeasuresComplete() {
+        val progress =
+            RhythmAudioTiming.nextExerciseProgress(
+                currentSubdivision = 3,
+                currentMeasure = 1,
+                measuresPerSubdivision = 2,
+                currentDirection = ExerciseDirection.ASCENDING
+            )
+
+        assertEquals(3, progress.subdivision)
+        assertEquals(2, progress.measure)
+        assertEquals(
+            ExerciseDirection.ASCENDING,
+            progress.direction
+        )
+        assertEquals(false, progress.completed)
+    }
+
+    @Test
+    fun ascendingExerciseAdvancesSubdivisionNormally() {
+        val progress =
+            RhythmAudioTiming.nextExerciseProgress(
+                currentSubdivision = 3,
+                currentMeasure = 2,
+                measuresPerSubdivision = 2,
+                currentDirection = ExerciseDirection.ASCENDING
+            )
+
+        assertEquals(4, progress.subdivision)
+        assertEquals(1, progress.measure)
+        assertEquals(
+            ExerciseDirection.ASCENDING,
+            progress.direction
+        )
+        assertEquals(false, progress.completed)
+    }
+
+    @Test
+    fun exerciseTurnsDescendingAfterSubdivisionEight() {
+        val progress =
+            RhythmAudioTiming.nextExerciseProgress(
+                currentSubdivision = 8,
+                currentMeasure = 2,
+                measuresPerSubdivision = 2,
+                currentDirection = ExerciseDirection.ASCENDING
+            )
+
+        assertEquals(7, progress.subdivision)
+        assertEquals(1, progress.measure)
+        assertEquals(
+            ExerciseDirection.DESCENDING,
+            progress.direction
+        )
+        assertEquals(false, progress.completed)
+    }
+
+    @Test
+    fun descendingExerciseMovesToLowerSubdivision() {
+        val progress =
+            RhythmAudioTiming.nextExerciseProgress(
+                currentSubdivision = 7,
+                currentMeasure = 2,
+                measuresPerSubdivision = 2,
+                currentDirection = ExerciseDirection.DESCENDING
+            )
+
+        assertEquals(6, progress.subdivision)
+        assertEquals(1, progress.measure)
+        assertEquals(
+            ExerciseDirection.DESCENDING,
+            progress.direction
+        )
+        assertEquals(false, progress.completed)
+    }
+
+    @Test
+    fun exerciseCompletesAfterDescendingSubdivisionOne() {
+        val progress =
+            RhythmAudioTiming.nextExerciseProgress(
+                currentSubdivision = 1,
+                currentMeasure = 2,
+                measuresPerSubdivision = 2,
+                currentDirection = ExerciseDirection.DESCENDING
+            )
+
+        assertEquals(1, progress.subdivision)
+        assertEquals(2, progress.measure)
+        assertEquals(
+            ExerciseDirection.DESCENDING,
+            progress.direction
+        )
+        assertEquals(true, progress.completed)
+    }
 }

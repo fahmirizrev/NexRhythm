@@ -45,7 +45,29 @@ internal data class RhythmAudioOptions(
     val guideSound: GuideSoundMode
 )
 
+internal enum class ExerciseDirection {
+    ASCENDING,
+    DESCENDING
+}
+
+internal data class RhythmExerciseProgress(
+    val subdivision: Int,
+    val measure: Int,
+    val direction: ExerciseDirection,
+    val completed: Boolean
+)
+
+internal data class RhythmPlaybackState(
+    val subdivision: Int,
+    val beatIndex: Int,
+    val exerciseMeasure: Int?,
+    val exerciseDirection: ExerciseDirection?,
+    val exerciseComplete: Boolean
+)
+
+
 internal object RhythmAudioTiming {
+
     const val SAMPLE_RATE = 48_000
 
     fun beatFrames(bpm: Int): Int {
@@ -77,7 +99,76 @@ internal object RhythmAudioTiming {
                 currentBeatIndex + 1
                 ) % timeSignature.numerator
     }
+
+    fun nextExerciseProgress(
+        currentSubdivision: Int,
+        currentMeasure: Int,
+        measuresPerSubdivision: Int,
+        currentDirection: ExerciseDirection
+    ): RhythmExerciseProgress {
+        val safeSubdivision =
+            currentSubdivision.coerceIn(1, 8)
+
+        val safeMeasuresPerSubdivision =
+            measuresPerSubdivision.coerceAtLeast(1)
+
+        val safeMeasure =
+            currentMeasure.coerceIn(
+                1,
+                safeMeasuresPerSubdivision
+            )
+
+        return when {
+            safeMeasure < safeMeasuresPerSubdivision -> {
+                RhythmExerciseProgress(
+                    subdivision = safeSubdivision,
+                    measure = safeMeasure + 1,
+                    direction = currentDirection,
+                    completed = false
+                )
+            }
+
+            currentDirection == ExerciseDirection.ASCENDING &&
+                    safeSubdivision < 8 -> {
+                RhythmExerciseProgress(
+                    subdivision = safeSubdivision + 1,
+                    measure = 1,
+                    direction = ExerciseDirection.ASCENDING,
+                    completed = false
+                )
+            }
+
+            currentDirection == ExerciseDirection.ASCENDING -> {
+                RhythmExerciseProgress(
+                    subdivision = 7,
+                    measure = 1,
+                    direction = ExerciseDirection.DESCENDING,
+                    completed = false
+                )
+            }
+
+            safeSubdivision > 1 -> {
+                RhythmExerciseProgress(
+                    subdivision = safeSubdivision - 1,
+                    measure = 1,
+                    direction = ExerciseDirection.DESCENDING,
+                    completed = false
+                )
+            }
+
+            else -> {
+                RhythmExerciseProgress(
+                    subdivision = 1,
+                    measure = safeMeasuresPerSubdivision,
+                    direction = ExerciseDirection.DESCENDING,
+                    completed = true
+                )
+            }
+        }
+    }
+
 }
+
 
 internal class RhythmAudioEngine(
     context: Context
@@ -96,8 +187,20 @@ internal class RhythmAudioEngine(
     private val generation = AtomicInteger(0)
     private val currentBpm = AtomicInteger(60)
 
+    private val playbackState = AtomicReference(
+        RhythmPlaybackState(
+            subdivision = 2,
+            beatIndex = 0,
+            exerciseMeasure = null,
+            exerciseDirection = null,
+            exerciseComplete = false
+        )
+    )
+
+
     @Volatile
     private var worker: Thread? = null
+
 
     @Volatile
     private var currentTrack: AudioTrack? = null
@@ -116,12 +219,17 @@ internal class RhythmAudioEngine(
         )
     }
 
+    fun playbackState(): RhythmPlaybackState {
+        return playbackState.get()
+    }
+
     @Synchronized
     fun start(
         bpm: Int,
         subdivision: Int,
         timeSignature: TimeSignature,
-        initialOptions: RhythmAudioOptions
+        initialOptions: RhythmAudioOptions,
+        exerciseMeasuresPerSubdivision: Int? = null
     ) {
         stopLocked()
 
@@ -131,14 +239,44 @@ internal class RhythmAudioEngine(
 
         options.set(initialOptions)
 
+        val initialSubdivision =
+            if (exerciseMeasuresPerSubdivision != null) {
+                1
+            } else {
+                subdivision.coerceIn(1, 8)
+            }
+
+        playbackState.set(
+            RhythmPlaybackState(
+                subdivision = initialSubdivision,
+                beatIndex = 0,
+                exerciseMeasure =
+                    if (exerciseMeasuresPerSubdivision != null) {
+                        1
+                    } else {
+                        null
+                    },
+                exerciseDirection =
+                    if (exerciseMeasuresPerSubdivision != null) {
+                        ExerciseDirection.ASCENDING
+                    } else {
+                        null
+                    },
+                exerciseComplete = false
+            )
+        )
+
+
         val runId = generation.incrementAndGet()
 
         worker = Thread(
             {
                 renderLoop(
                     runId = runId,
-                    subdivision = subdivision,
-                    timeSignature = timeSignature
+                    subdivision = initialSubdivision,
+                    timeSignature = timeSignature,
+                    exerciseMeasuresPerSubdivision =
+                        exerciseMeasuresPerSubdivision
                 )
             },
             "NexRhythmAudio"
@@ -147,6 +285,7 @@ internal class RhythmAudioEngine(
             start()
         }
     }
+
 
     @Synchronized
     fun stop() {
@@ -182,11 +321,26 @@ internal class RhythmAudioEngine(
     private fun renderLoop(
         runId: Int,
         subdivision: Int,
-        timeSignature: TimeSignature
+        timeSignature: TimeSignature,
+        exerciseMeasuresPerSubdivision: Int?
     ) {
-        val guideSyllables = syllablesFor(subdivision).map { syllable ->
-            sampleBank.syllables.getValue(syllable)
-        }
+        val exerciseMeasures =
+            exerciseMeasuresPerSubdivision
+                ?.coerceAtLeast(1)
+
+        var currentSubdivision =
+            subdivision.coerceIn(1, 8)
+
+        var exerciseMeasure = 1
+
+        var exerciseDirection =
+            ExerciseDirection.ASCENDING
+
+        var guideSyllables =
+
+            syllablesFor(currentSubdivision).map { syllable ->
+                sampleBank.syllables.getValue(syllable)
+            }
 
         val maxSampleFrames = sampleBank.maxSampleFrames
 
@@ -194,6 +348,26 @@ internal class RhythmAudioEngine(
         val writeBuffer = ShortArray(WRITE_CHUNK_FRAMES)
 
         var beatIndex = 0
+
+        playbackState.set(
+            RhythmPlaybackState(
+                subdivision = currentSubdivision,
+                beatIndex = beatIndex,
+                exerciseMeasure =
+                    if (exerciseMeasures != null) {
+                        exerciseMeasure
+                    } else {
+                        null
+                    },
+                exerciseDirection =
+                    if (exerciseMeasures != null) {
+                        exerciseDirection
+                    } else {
+                        null
+                    },
+                exerciseComplete = false
+            )
+        )
 
         val track = createAudioTrack()
 
@@ -215,7 +389,7 @@ internal class RhythmAudioEngine(
                 val subdivisionOffsets =
                     RhythmAudioTiming.subdivisionOffsets(
                         beatFrames = beatFrames,
-                        subdivision = subdivision
+                        subdivision = currentSubdivision
                     )
 
                 val mixBuffer = IntArray(
@@ -286,11 +460,74 @@ internal class RhythmAudioEngine(
                         mixBuffer[beatFrames + index]
                 }
 
-                beatIndex =
+                val nextBeatIndex =
                     RhythmAudioTiming.nextBeatInMeasure(
                         currentBeatIndex = beatIndex,
                         timeSignature = timeSignature
                     )
+
+                if (
+                    nextBeatIndex == 0 &&
+                    exerciseMeasures != null
+                ) {
+                    val nextProgress =
+                        RhythmAudioTiming.nextExerciseProgress(
+                            currentSubdivision = currentSubdivision,
+                            currentMeasure = exerciseMeasure,
+                            measuresPerSubdivision = exerciseMeasures,
+                            currentDirection = exerciseDirection
+                        )
+
+                    currentSubdivision =
+                        nextProgress.subdivision
+
+                    exerciseMeasure =
+                        nextProgress.measure
+
+                    exerciseDirection =
+                        nextProgress.direction
+
+                    if (nextProgress.completed) {
+                        playbackState.set(
+                            RhythmPlaybackState(
+                                subdivision = currentSubdivision,
+                                beatIndex = 0,
+                                exerciseMeasure = exerciseMeasure,
+                                exerciseDirection = exerciseDirection,
+                                exerciseComplete = true
+                            )
+                        )
+
+                        break
+                    }
+
+                    guideSyllables =
+                        syllablesFor(currentSubdivision).map { syllable ->
+                            sampleBank.syllables.getValue(syllable)
+                        }
+                }
+
+                beatIndex = nextBeatIndex
+
+                playbackState.set(
+                    RhythmPlaybackState(
+                        subdivision = currentSubdivision,
+                        beatIndex = beatIndex,
+                        exerciseMeasure =
+                            if (exerciseMeasures != null) {
+                                exerciseMeasure
+                            } else {
+                                null
+                            },
+                        exerciseDirection =
+                            if (exerciseMeasures != null) {
+                                exerciseDirection
+                            } else {
+                                null
+                            },
+                        exerciseComplete = false
+                    )
+                )
             }
         } finally {
             runCatching {
@@ -314,6 +551,7 @@ internal class RhythmAudioEngine(
             }
         }
     }
+
 
     private fun writeBeat(
         track: AudioTrack,
