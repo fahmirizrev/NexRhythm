@@ -30,14 +30,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -45,12 +49,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -64,6 +70,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexrhythm.app.ui.theme.NexRhythmTheme
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -81,9 +88,7 @@ class MainActivity : ComponentActivity() {
                     containerColor = MaterialTheme.colorScheme.background
                 ) { innerPadding ->
                     TrainerScreen(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
+                        modifier = Modifier.fillMaxSize().padding(innerPadding)
                     )
                 }
             }
@@ -94,8 +99,7 @@ class MainActivity : ComponentActivity() {
 private enum class TrainerMode(
     val label: String
 ) {
-    BASIC("Basic"),
-    EXERCISE("Exercise")
+    BASIC("Basic"), PYRAMID_EXERCISE("Pyramid Exercise")
 }
 
 @Composable
@@ -106,6 +110,11 @@ private fun TrainerScreen(
     var trainerMode by remember {
         mutableStateOf(TrainerMode.BASIC)
     }
+
+    val drawerState = rememberDrawerState(
+        initialValue = DrawerValue.Closed
+    )
+    val coroutineScope = rememberCoroutineScope()
 
     var bpm by remember { mutableIntStateOf(60) }
     var subdivision by remember { mutableIntStateOf(2) }
@@ -154,12 +163,11 @@ private fun TrainerScreen(
 
     val currentBpm by rememberUpdatedState(bpm)
 
-    val displayedSubdivision =
-        if (trainerMode == TrainerMode.EXERCISE) {
-            exerciseSubdivision
-        } else {
-            subdivision
-        }
+    val displayedSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+        exerciseSubdivision
+    } else {
+        subdivision
+    }
 
     DisposableEffect(audioEngine) {
 
@@ -169,8 +177,7 @@ private fun TrainerScreen(
     }
 
     LaunchedEffect(
-        audioEngine,
-        audioOptions
+        audioEngine, audioOptions
     ) {
         audioEngine.updateOptions(
             audioOptions
@@ -178,8 +185,7 @@ private fun TrainerScreen(
     }
 
     LaunchedEffect(
-        audioEngine,
-        bpm
+        audioEngine, bpm
     ) {
         audioEngine.updateBpm(bpm)
     }
@@ -195,20 +201,18 @@ private fun TrainerScreen(
         if (isRunning) {
             audioEngine.start(
                 bpm = bpm,
-                subdivision =
-                    if (trainerMode == TrainerMode.EXERCISE) {
-                        1
-                    } else {
-                        subdivision
-                    },
+                subdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+                    1
+                } else {
+                    subdivision
+                },
                 timeSignature = timeSignature,
                 initialOptions = audioOptions,
-                exerciseMeasuresPerSubdivision =
-                    if (trainerMode == TrainerMode.EXERCISE) {
-                        exerciseMeasuresPerSubdivision
-                    } else {
-                        null
-                    }
+                exerciseMeasuresPerSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+                    exerciseMeasuresPerSubdivision
+                } else {
+                    null
+                }
             )
         } else {
             audioEngine.stop()
@@ -217,10 +221,7 @@ private fun TrainerScreen(
 
 
     LaunchedEffect(
-        isRunning,
-        trainerMode,
-        subdivision,
-        timeSignature
+        isRunning, trainerMode, subdivision, timeSignature
     ) {
         if (!isRunning) {
             activeStep = -1
@@ -232,48 +233,39 @@ private fun TrainerScreen(
         currentBeatIndex = 0
 
 
-        var visualSubdivision =
-            if (trainerMode == TrainerMode.EXERCISE) {
-                1
-            } else {
-                subdivision
-            }
-
-        if (trainerMode == TrainerMode.EXERCISE) {
-            exerciseSubdivision = 1
-            exerciseMeasure = 1
-            exerciseDirection =
-                ExerciseDirection.ASCENDING
+        var visualSubdivision = if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+            1
+        } else {
+            subdivision
         }
 
-        var beatDurationNanos =
-            60_000_000_000L / currentBpm
+        if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+            exerciseSubdivision = 1
+            exerciseMeasure = 1
+            exerciseDirection = ExerciseDirection.ASCENDING
+        }
 
-        var beatStartTimeNanos =
-            withFrameNanos { it }
+        var beatDurationNanos = 60_000_000_000L / currentBpm
+
+        var beatStartTimeNanos = withFrameNanos { it }
 
         var exerciseCompleted = false
 
         while (!exerciseCompleted) {
             withFrameNanos { frameTimeNanos ->
-                val playbackState =
-                    audioEngine.playbackState()
+                val playbackState = audioEngine.playbackState()
 
-                currentBeatIndex =
-                    playbackState.beatIndex
+                currentBeatIndex = playbackState.beatIndex
 
-                if (trainerMode == TrainerMode.EXERCISE) {
+                if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
                     if (playbackState.exerciseMeasure != null) {
 
-                        exerciseSubdivision =
-                            playbackState.subdivision
+                        exerciseSubdivision = playbackState.subdivision
 
-                        exerciseMeasure =
-                            playbackState.exerciseMeasure
+                        exerciseMeasure = playbackState.exerciseMeasure
 
                         exerciseDirection =
-                            playbackState.exerciseDirection
-                                ?: ExerciseDirection.ASCENDING
+                            playbackState.exerciseDirection ?: ExerciseDirection.ASCENDING
 
                         if (playbackState.exerciseComplete) {
 
@@ -281,18 +273,12 @@ private fun TrainerScreen(
                             return@withFrameNanos
                         }
 
-                        if (
-                            playbackState.subdivision !=
-                            visualSubdivision
-                        ) {
-                            visualSubdivision =
-                                playbackState.subdivision
+                        if (playbackState.subdivision != visualSubdivision) {
+                            visualSubdivision = playbackState.subdivision
 
-                            beatStartTimeNanos =
-                                frameTimeNanos
+                            beatStartTimeNanos = frameTimeNanos
 
-                            beatDurationNanos =
-                                60_000_000_000L / currentBpm
+                            beatDurationNanos = 60_000_000_000L / currentBpm
 
                             activeStep = 0
 
@@ -301,284 +287,397 @@ private fun TrainerScreen(
                     }
                 }
 
-                var elapsedInBeat =
-                    frameTimeNanos - beatStartTimeNanos
+                var elapsedInBeat = frameTimeNanos - beatStartTimeNanos
 
                 while (elapsedInBeat >= beatDurationNanos) {
                     beatStartTimeNanos += beatDurationNanos
 
-                    beatDurationNanos =
-                        60_000_000_000L / currentBpm
+                    beatDurationNanos = 60_000_000_000L / currentBpm
 
-                    elapsedInBeat =
-                        frameTimeNanos - beatStartTimeNanos
+                    elapsedInBeat = frameTimeNanos - beatStartTimeNanos
                 }
 
-                activeStep = (
-                        (
-                                elapsedInBeat *
-                                        visualSubdivision
-                                ) / beatDurationNanos
-                        ).toInt().coerceIn(
-                        0,
-                        visualSubdivision - 1
+                activeStep =
+                    ((elapsedInBeat * visualSubdivision) / beatDurationNanos).toInt().coerceIn(
+                        0, visualSubdivision - 1
                     )
             }
         }
 
-        if (
-            trainerMode == TrainerMode.EXERCISE &&
-            isRunning
-        ) {
+        if (trainerMode == TrainerMode.PYRAMID_EXERCISE && isRunning) {
             isRunning = false
         }
     }
 
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 14.dp)
-    ) {
-        TrainerHeader()
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        TrainerModeSelector(
-            selectedMode = trainerMode,
-            onModeSelected = { selectedMode ->
-                if (selectedMode != trainerMode) {
-                    isRunning = false
-                    activeStep = -1
-                    trainerMode = selectedMode
-
-                    if (selectedMode == TrainerMode.EXERCISE) {
-                        exerciseSubdivision = 1
-                        exerciseMeasure = 1
-                        exerciseDirection =
-                            ExerciseDirection.ASCENDING
-                    }
-
-                }
-            }
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        TempoSection(
-
-            bpm = bpm,
-            timeSignature = timeSignature,
-            onBpmChange = { bpm = it.coerceIn(40, 240) },
-            onTimeSignatureChange = { selectedTimeSignature ->
-                timeSignature = selectedTimeSignature
-
-                if (
-                    trainerMode == TrainerMode.EXERCISE &&
-                    isRunning
+    ModalNavigationDrawer(
+        drawerState = drawerState, drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.fillMaxWidth(0.55f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = 24.dp,
+                        vertical = 20.dp
+                    )
                 ) {
-                    exerciseSubdivision = 1
-                    exerciseMeasure = 1
+                    Text(
+                        text = "NexRhythm",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "Rhythm Trainer",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    )
                 }
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+
+                Text(
+                    text = "TRAINING",
+                    modifier = Modifier.padding(
+                        horizontal = 28.dp, vertical = 6.dp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.sp
+                )
+
+                DrawerTreeItem(
+                    branch = "├──",
+                    label = "Basic",
+                    selected = trainerMode == TrainerMode.BASIC,
+                    onClick = {
+                        if (trainerMode != TrainerMode.BASIC) {
+                            isRunning = false
+                            activeStep = -1
+                            trainerMode = TrainerMode.BASIC
+                        }
+
+                        coroutineScope.launch {
+                            drawerState.close()
+                        }
+                    })
+
+                DrawerTreeItem(
+                    branch = "├──",
+                    label = "Pyramid Exercise",
+                    selected = trainerMode == TrainerMode.PYRAMID_EXERCISE,
+                    onClick = {
+                        if (trainerMode != TrainerMode.PYRAMID_EXERCISE) {
+                            isRunning = false
+                            activeStep = -1
+                            trainerMode = TrainerMode.PYRAMID_EXERCISE
+                            exerciseSubdivision = 1
+                            exerciseMeasure = 1
+                            exerciseDirection = ExerciseDirection.ASCENDING
+                        }
+
+                        coroutineScope.launch {
+                            drawerState.close()
+                        }
+                    })
+
+                DrawerTreeItem(
+                    branch = "├──", label = "My Exercise", enabled = false, onClick = {})
+
+                DrawerTreeItem(
+                    branch = "└──",
+                    label = "Polyrhythm",
+                    isLast = true,
+                    enabled = false,
+                    onClick = {})
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = "TOOLS",
+                    modifier = Modifier.padding(
+                        horizontal = 28.dp, vertical = 6.dp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.sp
+                )
+
+                DrawerTreeItem(
+                    branch = "└──",
+                    label = "BPM Detector",
+                    isLast = true,
+                    enabled = false,
+                    onClick = {})
             }
-        )
-
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (trainerMode == TrainerMode.BASIC) {
-            SubdivisionSection(
-                selectedSubdivision = subdivision,
-                onSubdivisionSelected = { subdivision = it }
-            )
-        } else {
-            ExerciseSection(
-                measuresPerSubdivision =
-                    exerciseMeasuresPerSubdivision,
-                currentSubdivision =
-                    exerciseSubdivision,
-                currentMeasure =
-                    exerciseMeasure,
-                currentDirection =
-                    exerciseDirection,
-                isRunning = isRunning,
-                onMeasuresChange = { measures ->
-                    exerciseMeasuresPerSubdivision =
-                        measures.coerceIn(1, 8)
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        PracticeSection(
-            subdivision = displayedSubdivision,
-            activeStep = activeStep,
-            timeSignature = timeSignature,
-            currentBeatIndex = currentBeatIndex,
-            modifier = Modifier.weight(1f)
-        )
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        AudioControls(
-            metronomeEnabled = metronomeEnabled,
-            metronomeSound = metronomeSound,
-            onMetronomeChanged = { metronomeEnabled = it },
-            onMetronomeSoundChanged = { metronomeSound = it },
-            guideEnabled = guideEnabled,
-            guideSound = guideSound,
-            onGuideChanged = { guideEnabled = it },
-            onGuideSoundChanged = { guideSound = it }
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = {
-                if (isRunning) {
-                    isRunning = false
-                } else {
-                    if (trainerMode == TrainerMode.EXERCISE) {
-                        exerciseSubdivision = 1
-                        exerciseMeasure = 1
-                        exerciseDirection =
-                            ExerciseDirection.ASCENDING
-                    }
-
-                    isRunning = true
-
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(10.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary
+        }) {
+        Column(
+            modifier = modifier.fillMaxSize().padding(
+                horizontal = 20.dp, vertical = 14.dp
             )
         ) {
-            Text(
-                text = when {
-                    isRunning -> {
-                        "■  STOP"
+            TrainerHeader(
+                currentMode = trainerMode, onMenuClick = {
+                    coroutineScope.launch {
+                        drawerState.open()
                     }
+                })
 
-                    trainerMode == TrainerMode.EXERCISE -> {
-                        "▶  START EXERCISE"
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TempoSection(
+                bpm = bpm,
+                timeSignature = timeSignature,
+                onBpmChange = { bpm = it.coerceIn(40, 240) },
+                onTimeSignatureChange = { selectedTimeSignature ->
+                    timeSignature = selectedTimeSignature
+
+                    if (trainerMode == TrainerMode.PYRAMID_EXERCISE && isRunning) {
+                        exerciseSubdivision = 1
+                        exerciseMeasure = 1
                     }
+                })
 
-                    else -> {
-                        "▶  START PRACTICE"
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (trainerMode == TrainerMode.BASIC) {
+                SubdivisionSection(
+                    selectedSubdivision = subdivision, onSubdivisionSelected = { subdivision = it })
+            } else {
+                PyramidExerciseSection(
+                    measuresPerSubdivision = exerciseMeasuresPerSubdivision,
+                    currentSubdivision = exerciseSubdivision,
+                    currentMeasure = exerciseMeasure,
+                    currentDirection = exerciseDirection,
+                    isRunning = isRunning,
+                    onMeasuresChange = { measures ->
+                        exerciseMeasuresPerSubdivision = measures.coerceIn(1, 8)
+                    })
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            PracticeSection(
+                subdivision = displayedSubdivision,
+                activeStep = activeStep,
+                timeSignature = timeSignature,
+                currentBeatIndex = currentBeatIndex,
+                modifier = Modifier.weight(1f)
+            )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AudioControls(
+                metronomeEnabled = metronomeEnabled,
+                metronomeSound = metronomeSound,
+                onMetronomeChanged = { metronomeEnabled = it },
+                onMetronomeSoundChanged = { metronomeSound = it },
+                guideEnabled = guideEnabled,
+                guideSound = guideSound,
+                onGuideChanged = { guideEnabled = it },
+                onGuideSoundChanged = { guideSound = it })
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = {
+                    if (isRunning) {
+                        isRunning = false
+                    } else {
+                        if (trainerMode == TrainerMode.PYRAMID_EXERCISE) {
+                            exerciseSubdivision = 1
+                            exerciseMeasure = 1
+                            exerciseDirection = ExerciseDirection.ASCENDING
+                        }
+
+                        isRunning = true
+
                     }
                 },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp
-            )
-        }
-
-    }
-}
-
-@Composable
-private fun TrainerHeader() {
-    Column {
-        Text(
-            text = "NexRhythm",
-            color = MaterialTheme.colorScheme.onBackground,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        Text(
-            text = "Rhythm Trainer",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Normal
-        )
-    }
-}
-
-@Composable
-private fun TrainerModeSelector(
-    selectedMode: TrainerMode,
-    onModeSelected: (TrainerMode) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(36.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(9.dp)
-            )
-    ) {
-        TrainerMode.entries.forEach { mode ->
-            val selected = mode == selectedMode
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (selected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            Color.Transparent
-                        }
-                    )
-                    .clickable {
-                        onModeSelected(mode)
-                    },
-                contentAlignment = Alignment.Center
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
             ) {
                 Text(
-                    text = mode.label,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontSize = 12.sp,
-                    fontWeight = if (selected) {
-                        FontWeight.SemiBold
-                    } else {
-                        FontWeight.Medium
-                    }
+                    text = when {
+                        isRunning -> {
+                            "■  STOP"
+                        }
+
+                        trainerMode == TrainerMode.PYRAMID_EXERCISE -> {
+                            "▶  START PYRAMID EXERCISE"
+                        }
+
+                        else -> {
+                            "▶  START PRACTICE"
+                        }
+                    }, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp
                 )
             }
         }
     }
 }
+
+@Composable
+private fun DrawerTreeItem(
+    branch: String,
+    label: String,
+    isLast: Boolean = false,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val textColor = when {
+        selected -> {
+            MaterialTheme.colorScheme.primary
+        }
+
+        enabled -> {
+            MaterialTheme.colorScheme.onSurface
+        }
+
+        else -> {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
+        }
+    }
+
+    val guideColor = when {
+        selected -> {
+            MaterialTheme.colorScheme.primary
+        }
+
+        enabled -> {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+        }
+
+        else -> {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) {
+            onClick()
+        }.padding(
+            start = 28.dp, end = 16.dp
+        ).height(32.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        Canvas(
+            modifier = Modifier.width(28.dp).fillMaxHeight()
+        ) {
+            val guideX = 6.dp.toPx()
+            val centerY = size.height / 2f
+            val verticalEnd = if (isLast) {
+                centerY
+            } else {
+                size.height
+            }
+
+            drawLine(
+                color = guideColor, start = Offset(
+                    x = guideX, y = 0f
+                ), end = Offset(
+                    x = guideX, y = verticalEnd
+                ), strokeWidth = 1.dp.toPx(), cap = StrokeCap.Round
+            )
+
+            drawLine(
+                color = guideColor, start = Offset(
+                    x = guideX, y = centerY
+                ), end = Offset(
+                    x = size.width, y = centerY
+                ), strokeWidth = 1.dp.toPx(), cap = StrokeCap.Round
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = label, color = textColor, fontSize = 13.sp, fontWeight = if (selected) {
+                FontWeight.SemiBold
+            } else {
+                FontWeight.Medium
+            }
+        )
+    }
+}
+
+@Composable
+private fun TrainerHeader(
+    currentMode: TrainerMode, onMenuClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = onMenuClick,
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.size(44.dp)
+        ) {
+            Text(
+                text = "☰",
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Column {
+            Text(
+                text = "NexRhythm",
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = currentMode.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Normal
+            )
+        }
+    }
+}
+
 
 @Composable
 private fun TempoSection(
@@ -610,9 +709,7 @@ private fun TempoSection(
                     modifier = Modifier.size(44.dp)
                 ) {
                     Text(
-                        text = "−",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Normal
+                        text = "−", fontSize = 24.sp, fontWeight = FontWeight.Normal
                     )
                 }
 
@@ -643,9 +740,7 @@ private fun TempoSection(
                     modifier = Modifier.size(44.dp)
                 ) {
                     Text(
-                        text = "+",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Normal
+                        text = "+", fontSize = 22.sp, fontWeight = FontWeight.Normal
                     )
                 }
             }
@@ -658,11 +753,8 @@ private fun TempoSection(
         }
 
         Slider(
-            value = bpm.toFloat(),
-            onValueChange = { rawValue ->
-                val snappedBpm = (
-                        (rawValue / 5f).roundToInt() * 5
-                        ).coerceIn(40, 240)
+            value = bpm.toFloat(), onValueChange = { rawValue ->
+                val snappedBpm = ((rawValue / 5f).roundToInt() * 5).coerceIn(40, 240)
 
                 if (snappedBpm != bpm) {
                     hapticFeedback.performHapticFeedback(
@@ -670,16 +762,11 @@ private fun TempoSection(
                     )
                     onBpmChange(snappedBpm)
                 }
-            },
-            valueRange = 40f..240f,
-            colors = SliderDefaults.colors(
+            }, valueRange = 40f..240f, colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
                 inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp)
+            ), modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
         )
     }
 }
@@ -697,14 +784,11 @@ private fun TimeSignatureDropdown(
     ) {
         TextButton(
             onClick = { expanded = true },
-            modifier = Modifier
-                .width(68.dp)
-                .height(44.dp)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    shape = RoundedCornerShape(10.dp)
-                ),
+            modifier = Modifier.width(68.dp).height(44.dp).border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(10.dp)
+            ),
             shape = RoundedCornerShape(10.dp),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
         ) {
@@ -720,33 +804,26 @@ private fun TimeSignatureDropdown(
                     fontWeight = FontWeight.SemiBold
                 )
 
-                val chevronColor =
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                val chevronColor = MaterialTheme.colorScheme.onSurfaceVariant
 
                 Canvas(
                     modifier = Modifier.size(14.dp)
                 ) {
                     val path = Path().apply {
                         moveTo(
-                            x = size.width * 0.25f,
-                            y = size.height * 0.40f
+                            x = size.width * 0.25f, y = size.height * 0.40f
                         )
                         lineTo(
-                            x = size.width * 0.50f,
-                            y = size.height * 0.65f
+                            x = size.width * 0.50f, y = size.height * 0.65f
                         )
                         lineTo(
-                            x = size.width * 0.75f,
-                            y = size.height * 0.40f
+                            x = size.width * 0.75f, y = size.height * 0.40f
                         )
                     }
 
                     drawPath(
-                        path = path,
-                        color = chevronColor,
-                        style = Stroke(
-                            width = 1.5.dp.toPx(),
-                            cap = StrokeCap.Round
+                        path = path, color = chevronColor, style = Stroke(
+                            width = 1.5.dp.toPx(), cap = StrokeCap.Round
                         )
                     )
                 }
@@ -754,22 +831,16 @@ private fun TimeSignatureDropdown(
         }
 
         DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
+            expanded = expanded, onDismissRequest = { expanded = false }) {
             TimeSignature.entries.forEach { timeSignature ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = timeSignature.label,
-                            fontSize = 13.sp
-                        )
-                    },
-                    onClick = {
-                        onTimeSignatureSelected(timeSignature)
-                        expanded = false
-                    }
-                )
+                DropdownMenuItem(text = {
+                    Text(
+                        text = timeSignature.label, fontSize = 13.sp
+                    )
+                }, onClick = {
+                    onTimeSignatureSelected(timeSignature)
+                    expanded = false
+                })
             }
         }
     }
@@ -777,8 +848,7 @@ private fun TimeSignatureDropdown(
 
 @Composable
 private fun SubdivisionSection(
-    selectedSubdivision: Int,
-    onSubdivisionSelected: (Int) -> Unit
+    selectedSubdivision: Int, onSubdivisionSelected: (Int) -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -797,36 +867,26 @@ private fun SubdivisionSection(
                     val selected = subdivision == selectedSubdivision
 
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp)
-                            .clickable {
-                                onSubdivisionSelected(subdivision)
-                            },
-                        contentAlignment = Alignment.Center
+                        modifier = Modifier.weight(1f).height(40.dp).clickable {
+                            onSubdivisionSelected(subdivision)
+                        }, contentAlignment = Alignment.Center
                     ) {
                         Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(9.dp))
+                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp))
                                 .background(
                                     if (selected) {
                                         MaterialTheme.colorScheme.primaryContainer
                                     } else {
                                         Color.Transparent
                                     }
-                                ),
-                            contentAlignment = Alignment.Center
+                                ), contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = subdivision.toString(),
-                                color = if (selected) {
+                                text = subdivision.toString(), color = if (selected) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                fontSize = 14.sp,
-                                fontWeight = if (selected) {
+                                }, fontSize = 14.sp, fontWeight = if (selected) {
                                     FontWeight.SemiBold
                                 } else {
                                     FontWeight.Medium
@@ -845,7 +905,7 @@ private fun SubdivisionSection(
 }
 
 @Composable
-private fun ExerciseSection(
+private fun PyramidExerciseSection(
     measuresPerSubdivision: Int,
     currentSubdivision: Int,
     currentMeasure: Int,
@@ -853,29 +913,28 @@ private fun ExerciseSection(
     isRunning: Boolean,
     onMeasuresChange: (Int) -> Unit
 ) {
-    val nextSubdivision =
-        when (currentDirection) {
-            ExerciseDirection.ASCENDING -> {
-                if (currentSubdivision < 8) {
-                    currentSubdivision + 1
-                } else {
-                    7
-                }
-            }
-
-            ExerciseDirection.DESCENDING -> {
-                if (currentSubdivision > 1) {
-                    currentSubdivision - 1
-                } else {
-                    null
-                }
+    val nextSubdivision = when (currentDirection) {
+        ExerciseDirection.ASCENDING -> {
+            if (currentSubdivision < 8) {
+                currentSubdivision + 1
+            } else {
+                7
             }
         }
+
+        ExerciseDirection.DESCENDING -> {
+            if (currentSubdivision > 1) {
+                currentSubdivision - 1
+            } else {
+                null
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        SectionLabel("EXERCISE")
+        SectionLabel("PYRAMID EXERCISE")
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -896,31 +955,23 @@ private fun ExerciseSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             for (subdivision in 1..8) {
-                val selected =
-                    subdivision == currentSubdivision
+                val selected = subdivision == currentSubdivision
 
                 Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(
-                            if (selected) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                Color.Transparent
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
+                    modifier = Modifier.size(24.dp).clip(RoundedCornerShape(7.dp)).background(
+                        if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            Color.Transparent
+                        }
+                    ), contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = subdivision.toString(),
-                        color = if (selected) {
+                        text = subdivision.toString(), color = if (selected) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = if (selected) {
+                        }, fontSize = 12.sp, fontWeight = if (selected) {
                             FontWeight.SemiBold
                         } else {
                             FontWeight.Medium
@@ -930,12 +981,9 @@ private fun ExerciseSection(
 
                 if (subdivision < 8) {
                     Text(
-                        text = "→",
-                        modifier = Modifier.padding(
+                        text = "→", modifier = Modifier.padding(
                             horizontal = 1.dp
-                        ),
-                        color = MaterialTheme.colorScheme.outline,
-                        fontSize = 11.sp
+                        ), color = MaterialTheme.colorScheme.outline, fontSize = 11.sp
                     )
                 }
             }
@@ -944,9 +992,7 @@ private fun ExerciseSection(
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(
@@ -955,15 +1001,12 @@ private fun ExerciseSection(
                         measuresPerSubdivision - 1
                     )
                 },
-                enabled =
-                    !isRunning &&
-                            measuresPerSubdivision > 1,
+                enabled = !isRunning && measuresPerSubdivision > 1,
                 contentPadding = PaddingValues(0.dp),
                 modifier = Modifier.size(36.dp)
             ) {
                 Text(
-                    text = "−",
-                    fontSize = 20.sp
+                    text = "−", fontSize = 20.sp
                 )
             }
 
@@ -989,30 +1032,23 @@ private fun ExerciseSection(
                         measuresPerSubdivision + 1
                     )
                 },
-                enabled =
-                    !isRunning &&
-                            measuresPerSubdivision < 8,
+                enabled = !isRunning && measuresPerSubdivision < 8,
                 contentPadding = PaddingValues(0.dp),
                 modifier = Modifier.size(36.dp)
             ) {
                 Text(
-                    text = "+",
-                    fontSize = 18.sp
+                    text = "+", fontSize = 18.sp
                 )
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text =
-                    if (
-                        currentDirection ==
-                        ExerciseDirection.ASCENDING
-                    ) {
-                        "Up"
-                    } else {
-                        "Down"
-                    },
+                text = if (currentDirection == ExerciseDirection.ASCENDING) {
+                    "Up"
+                } else {
+                    "Down"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold
@@ -1022,13 +1058,9 @@ private fun ExerciseSection(
 
             Text(
                 text = if (nextSubdivision != null) {
-                    "Measure $currentMeasure/" +
-                            "$measuresPerSubdivision" +
-                            "  ·  Next $nextSubdivision"
+                    "Measure $currentMeasure/" + "$measuresPerSubdivision" + "  ·  Next $nextSubdivision"
                 } else {
-                    "Measure $currentMeasure/" +
-                            "$measuresPerSubdivision" +
-                            "  ·  Final"
+                    "Measure $currentMeasure/" + "$measuresPerSubdivision" + "  ·  Final"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp,
@@ -1051,9 +1083,7 @@ private fun PracticeSection(
     val beatCount = timeSignature.numerator
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .fillMaxHeight()
+        modifier = modifier.fillMaxWidth().fillMaxHeight()
     ) {
         SectionLabel("PRACTICE")
 
@@ -1061,12 +1091,12 @@ private fun PracticeSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(bottom = 4.dp),
-            contentAlignment = Alignment.Center
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxSize()
             ) {
+                Spacer(modifier = Modifier.weight(1f))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1081,12 +1111,11 @@ private fun PracticeSection(
                     )
 
                     Text(
-                        text =
-                            if (beatCount == 1) {
-                                "1 BEAT"
-                            } else {
-                                "$beatCount BEATS"
-                            },
+                        text = if (beatCount == 1) {
+                            "1 BEAT"
+                        } else {
+                            "$beatCount BEATS"
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
@@ -1096,65 +1125,46 @@ private fun PracticeSection(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(18.dp)
+                    modifier = Modifier.fillMaxWidth().height(18.dp)
                 ) {
                     val timelineStart = 18.dp
-                    val timelineDuration =
-                        maxWidth - timelineStart
+                    val timelineDuration = maxWidth - timelineStart
                     val beatMarkerSize = 15.dp
 
                     BeatWaveform(
                         beatCount = beatCount,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = timelineStart)
+                        modifier = Modifier.fillMaxWidth().padding(start = timelineStart)
                     )
 
                     for (beatIndex in 0 until beatCount) {
-                        val progress =
-                            beatIndex.toFloat() /
-                                    beatCount.toFloat()
+                        val progress = beatIndex.toFloat() / beatCount.toFloat()
 
-                        val beatPosition =
-                            timelineStart +
-                                    (timelineDuration * progress)
+                        val beatPosition = timelineStart + (timelineDuration * progress)
 
-                        val active =
-                            currentBeatIndex == beatIndex
+                        val active = currentBeatIndex == beatIndex
 
                         Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = beatPosition -
-                                            (beatMarkerSize / 2)
-                                )
-                                .align(Alignment.CenterStart)
-                                .size(beatMarkerSize)
-                                .clip(CircleShape)
+                            modifier = Modifier.offset(
+                                x = beatPosition - (beatMarkerSize / 2)
+                            ).align(Alignment.CenterStart).size(beatMarkerSize).clip(CircleShape)
                                 .background(
                                     if (active) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         Color.Transparent
                                     }
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (active) {
+                                ).border(
+                                    width = 1.dp, color = if (active) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
-                                        MaterialTheme.colorScheme.primary
-                                            .copy(alpha = 0.55f)
-                                    },
-                                    shape = CircleShape
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                                    }, shape = CircleShape
                                 )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.weight(1f))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1180,9 +1190,7 @@ private fun PracticeSection(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
 
                     val timelineStart = 18.dp
@@ -1191,20 +1199,19 @@ private fun PracticeSection(
 
                     syllables.forEachIndexed { index, syllable ->
                         val progress = index.toFloat() / subdivision.toFloat()
-                        val notePosition =
-                            timelineStart + (timelineDuration * progress)
+                        val notePosition = timelineStart + (timelineDuration * progress)
 
                         PracticeStep(
                             syllable = syllable,
                             active = activeStep == index,
-                            modifier = Modifier
-                                .width(stepWidth)
-                                .offset(
-                                    x = notePosition - (stepWidth / 2)
-                                )
+                            modifier = Modifier.width(stepWidth).offset(
+                                x = notePosition - (stepWidth / 2)
+                            )
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
@@ -1212,80 +1219,55 @@ private fun PracticeSection(
 
 @Composable
 private fun BeatWaveform(
-    beatCount: Int,
-    modifier: Modifier = Modifier
+    beatCount: Int, modifier: Modifier = Modifier
 ) {
-    val waveformColor =
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+    val waveformColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
 
     Canvas(
         modifier = modifier.height(18.dp)
     ) {
-        val safeBeatCount =
-            beatCount.coerceAtLeast(1)
+        val safeBeatCount = beatCount.coerceAtLeast(1)
 
         val centerY = size.height / 2f
         val amplitude = size.height * 0.24f
 
-        val beatWidth =
-            size.width / safeBeatCount
+        val beatWidth = size.width / safeBeatCount
 
-        val markerRadius =
-            7.5.dp.toPx()
+        val markerRadius = 7.5.dp.toPx()
 
-        val markerGap =
-            4.dp.toPx()
+        val markerGap = 4.dp.toPx()
 
         val samplesPerBeat = 24
 
         for (beatIndex in 0 until safeBeatCount) {
-            val beatStart =
-                beatWidth * beatIndex
+            val beatStart = beatWidth * beatIndex
 
-            val beatEnd =
-                beatWidth * (beatIndex + 1)
+            val beatEnd = beatWidth * (beatIndex + 1)
 
-            val segmentStart =
-                beatStart +
-                        markerRadius +
-                        markerGap
+            val segmentStart = beatStart + markerRadius + markerGap
 
-            val segmentEnd =
-                if (beatIndex < safeBeatCount - 1) {
-                    beatEnd -
-                            markerRadius -
-                            markerGap
-                } else {
-                    beatEnd
-                }
+            val segmentEnd = if (beatIndex < safeBeatCount - 1) {
+                beatEnd - markerRadius - markerGap
+            } else {
+                beatEnd
+            }
 
             if (segmentEnd <= segmentStart) {
                 continue
             }
 
-            val segmentWidth =
-                segmentEnd - segmentStart
+            val segmentWidth = segmentEnd - segmentStart
 
             val path = Path()
 
             for (sampleIndex in 0..samplesPerBeat) {
-                val progress =
-                    sampleIndex.toFloat() /
-                            samplesPerBeat
+                val progress = sampleIndex.toFloat() / samplesPerBeat
 
-                val x =
-                    segmentStart +
-                            (segmentWidth * progress)
+                val x = segmentStart + (segmentWidth * progress)
 
-                val phase =
-                    progress *
-                            2f *
-                            PI.toFloat()
+                val phase = progress * 2f * PI.toFloat()
 
-                val y =
-                    centerY +
-                            sin(phase) *
-                            amplitude
+                val y = centerY + sin(phase) * amplitude
 
                 if (sampleIndex == 0) {
                     path.moveTo(x, y)
@@ -1295,11 +1277,8 @@ private fun BeatWaveform(
             }
 
             drawPath(
-                path = path,
-                color = waveformColor,
-                style = Stroke(
-                    width = 1.5.dp.toPx(),
-                    cap = StrokeCap.Round
+                path = path, color = waveformColor, style = Stroke(
+                    width = 1.5.dp.toPx(), cap = StrokeCap.Round
                 )
             )
         }
@@ -1309,52 +1288,39 @@ private fun BeatWaveform(
 
 @Composable
 private fun PracticeStep(
-    syllable: String,
-    active: Boolean,
-    modifier: Modifier = Modifier
+    syllable: String, active: Boolean, modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier
-                .size(15.dp)
-                .clip(CircleShape)
-                .background(
-                    if (active) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.Transparent
-                    }
-                )
-                .border(
-                    width = 1.dp,
-                    color = if (active) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
-                    shape = CircleShape
-                )
+            modifier = Modifier.size(15.dp).clip(CircleShape).background(
+                if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.Transparent
+                }
+            ).border(
+                width = 1.dp, color = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outline
+                }, shape = CircleShape
+            )
         )
 
         Spacer(modifier = Modifier.height(9.dp))
 
         Text(
-            text = syllable,
-            color = if (active) {
+            text = syllable, color = if (active) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurface
-            },
-            fontSize = 12.sp,
-            fontWeight = if (active) {
+            }, fontSize = 12.sp, fontWeight = if (active) {
                 FontWeight.SemiBold
             } else {
                 FontWeight.Medium
-            },
-            textAlign = TextAlign.Center
+            }, textAlign = TextAlign.Center
         )
     }
 }
@@ -1371,8 +1337,7 @@ private fun AudioControls(
     onGuideSoundChanged: (GuideSoundMode) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         AudioControlGroup(
             label = "Metronome",
@@ -1380,8 +1345,7 @@ private fun AudioControls(
             soundOptions = MetronomeSoundMode.entries.map { it.label },
             checked = metronomeEnabled,
             onSoundSelected = { selectedLabel ->
-                MetronomeSoundMode.entries
-                    .firstOrNull { it.label == selectedLabel }
+                MetronomeSoundMode.entries.firstOrNull { it.label == selectedLabel }
                     ?.let(onMetronomeSoundChanged)
             },
             onCheckedChange = onMetronomeChanged,
@@ -1394,8 +1358,7 @@ private fun AudioControls(
             soundOptions = GuideSoundMode.entries.map { it.label },
             checked = guideEnabled,
             onSoundSelected = { selectedLabel ->
-                GuideSoundMode.entries
-                    .firstOrNull { it.label == selectedLabel }
+                GuideSoundMode.entries.firstOrNull { it.label == selectedLabel }
                     ?.let(onGuideSoundChanged)
             },
             onCheckedChange = onGuideChanged,
@@ -1439,8 +1402,7 @@ private fun AudioControlGroup(
             )
 
             Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange
+                checked = checked, onCheckedChange = onCheckedChange
             )
         }
     }
@@ -1460,14 +1422,11 @@ private fun SoundDropdown(
     ) {
         TextButton(
             onClick = { expanded = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    shape = RoundedCornerShape(12.dp)
-                ),
+            modifier = Modifier.fillMaxWidth().height(52.dp).border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(12.dp)
+            ),
             shape = RoundedCornerShape(12.dp),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
         ) {
@@ -1491,25 +1450,19 @@ private fun SoundDropdown(
                 ) {
                     val path = Path().apply {
                         moveTo(
-                            x = size.width * 0.25f,
-                            y = size.height * 0.40f
+                            x = size.width * 0.25f, y = size.height * 0.40f
                         )
                         lineTo(
-                            x = size.width * 0.50f,
-                            y = size.height * 0.65f
+                            x = size.width * 0.50f, y = size.height * 0.65f
                         )
                         lineTo(
-                            x = size.width * 0.75f,
-                            y = size.height * 0.40f
+                            x = size.width * 0.75f, y = size.height * 0.40f
                         )
                     }
 
                     drawPath(
-                        path = path,
-                        color = chevronColor,
-                        style = Stroke(
-                            width = 2.dp.toPx(),
-                            cap = StrokeCap.Round
+                        path = path, color = chevronColor, style = Stroke(
+                            width = 2.dp.toPx(), cap = StrokeCap.Round
                         )
                     )
                 }
@@ -1517,22 +1470,16 @@ private fun SoundDropdown(
         }
 
         DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
+            expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = option,
-                            fontSize = 13.sp
-                        )
-                    },
-                    onClick = {
-                        onSoundSelected(option)
-                        expanded = false
-                    }
-                )
+                DropdownMenuItem(text = {
+                    Text(
+                        text = option, fontSize = 13.sp
+                    )
+                }, onClick = {
+                    onSoundSelected(option)
+                    expanded = false
+                })
             }
         }
     }
@@ -1568,9 +1515,7 @@ internal fun syllablesFor(subdivision: Int): List<String> {
 }
 
 @Preview(
-    showBackground = true,
-    widthDp = 390,
-    heightDp = 844
+    showBackground = true, widthDp = 390, heightDp = 844
 )
 @Composable
 private fun TrainerScreenPreview() {
