@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -179,6 +180,10 @@ private fun TrainerScreen(
     var isRunning by remember { mutableStateOf(false) }
     var activeStep by remember { mutableIntStateOf(-1) }
     var currentBeatIndex by remember { mutableIntStateOf(-1) }
+
+    var showAboutDialog by remember {
+        mutableStateOf(false)
+    }
 
 
     val context = LocalContext.current
@@ -579,6 +584,92 @@ private fun TrainerScreen(
         }
     }
 
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAboutDialog = false
+            },
+            title = {
+                Text(
+                    text = "NexRhythm",
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Rhythm training, made clear.",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(12.dp)
+                    )
+
+                    Text(
+                        text =
+                            "A native Android rhythm trainer for " +
+                                    "subdivisions, custom exercises, " +
+                                    "and polyrhythms.",
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(16.dp)
+                    )
+
+                    Text(
+                        text =
+                            "Version ${BuildConfig.VERSION_NAME}",
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(4.dp)
+                    )
+
+                    Text(
+                        text = "Developed by FRIZDEV",
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(4.dp)
+                    )
+
+                    Text(
+                        text =
+                            "Built with Kotlin & Jetpack Compose",
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAboutDialog = false
+                    }
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState, drawerContent = {
@@ -686,6 +777,36 @@ private fun TrainerScreen(
                             drawerState.close()
                         }
                     })
+
+                Spacer(
+                    modifier = Modifier.weight(1f)
+                )
+
+                TextButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            drawerState.close()
+                            showAboutDialog = true
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    contentPadding = PaddingValues(
+                        horizontal = 28.dp
+                    )
+                ) {
+                    Text(
+                        text = "About",
+                        modifier = Modifier.fillMaxWidth(),
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurface,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Start
+                    )
+                }
             }
         }) {
         Column(
